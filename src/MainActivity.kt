@@ -1,6 +1,9 @@
 package com.exemple.ps5launcher
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
+import android.net.wifi.WifiManager
 import android.content.Intent
 import android.app.role.RoleManager
 import android.content.pm.ApplicationInfo
@@ -19,6 +22,7 @@ import android.widget.VideoView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
@@ -64,6 +68,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -73,14 +78,18 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.graphics.drawable.toBitmap
 import coil.compose.AsyncImage
 import coil.imageLoader
@@ -90,6 +99,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedInputStream
+import java.io.File
+import java.io.InputStream
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.Inet4Address
@@ -98,6 +110,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.URL
 import java.net.URLDecoder
+import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -132,8 +145,64 @@ val THEMES = listOf(
     Theme("Matrix", Color(0xFF00FF66), Color(0xFF00B3FF), Color(0xFF010A04)),
     Theme("Glace", Color(0xFF7DD3FF), Color(0xFFB388FF), Color(0xFF020A14)),
     Theme("Barça", Color(0xFFA50044), Color(0xFF004D98), Color(0xFF020818)),
+    Theme("Naruto orange", Color(0xFFFF8A00), Color(0xFF1565C0), Color(0xFF0A0500)),
+    Theme("Coucher de soleil", Color(0xFFFF5E62), Color(0xFFFFB300), Color(0xFF12060A)),
+    Theme("Violet gaming", Color(0xFF9C4DFF), Color(0xFF00E5FF), Color(0xFF070212)),
+    Theme("Rouge sang", Color(0xFFFF1744), Color(0xFF880E4F), Color(0xFF0D0204)),
+    Theme("Or royal", Color(0xFFFFC400), Color(0xFF6D4C41), Color(0xFF0B0802)),
+    Theme("Cyan électrique", Color(0xFF00E5FF), Color(0xFF2979FF), Color(0xFF01080F)),
+    Theme("Vert toxique", Color(0xFFB2FF59), Color(0xFF00BFA5), Color(0xFF030A02)),
 )
-val BG_MODES = listOf("Images", "Vidéo", "Particules")
+val BG_MODES = listOf("Images", "Vidéo", "Particules", "Mes photos")
+val PARTICLE_STYLES = listOf("Étoiles", "Pluie néon", "Neige", "Bulles", "Lucioles", "Matrix")
+val DIM_LEVELS = listOf(0.08f, 0.25f, 0.45f)
+val DIM_NAMES = listOf("Lumineux", "Normal", "Sombre")
+val SAVER_BGS = listOf("Mes photos", "Animés", "Particules")
+
+val QUOTES = listOf(
+    "Chaque jour est une nouvelle chance de devenir plus fort.",
+    "Les rêves ne meurent pas, on les abandonne.",
+    "Tombe sept fois, relève-toi huit.",
+    "Le travail bat le talent quand le talent ne travaille pas.",
+    "Ce n'est pas la vitesse qui compte, mais la direction.",
+    "Un guerrier ne s'arrête jamais de s'entraîner.",
+    "La patience est la clé de tout.",
+    "Crois en toi, même quand personne d'autre ne le fait.",
+    "Le meilleur moment pour commencer, c'est maintenant.",
+    "La vraie force vient de ceux que l'on protège.",
+    "Sois la meilleure version de toi-même.",
+    "Les petites victoires construisent les grands succès.",
+    "Rien n'est impossible à celui qui ne renonce pas.",
+    "Le courage, c'est d'avancer malgré la peur.",
+    "Après la pluie, le beau temps.",
+    "Un pas après l'autre, on va très loin.",
+    "Ton seul adversaire, c'est celui que tu étais hier.",
+    "La discipline est le pont entre les objectifs et les résultats.",
+    "Vise la lune : même si tu rates, tu atterriras parmi les étoiles.",
+    "L'important n'est pas la chute, mais la façon de se relever.",
+    "Fais-le avec passion ou ne le fais pas.",
+    "Més que un club.",
+    "Visca el Barça !",
+    "Le talent gagne des matchs, le collectif gagne des titres.",
+    "Garde la tête haute et le cœur ouvert.",
+    "Chaque champion a un jour été un débutant.",
+    "Ce que tu fais aujourd'hui construit ce que tu seras demain.",
+    "Même la nuit la plus sombre finit par se lever.",
+)
+
+data class WallTheme(val name: String, val query: String, val cats: String)
+
+val WALL_THEMES = listOf(
+    WallTheme("Naruto", "naruto", "010"),
+    WallTheme("One Piece", "one piece", "010"),
+    WallTheme("Dragon Ball", "dragon ball", "010"),
+    WallTheme("Demon Slayer", "demon slayer", "010"),
+    WallTheme("Attack on Titan", "attack on titan", "010"),
+    WallTheme("Jujutsu Kaisen", "jujutsu kaisen", "010"),
+    WallTheme("Bleach", "bleach", "010"),
+    WallTheme("Anime (mélange)", "", "010"),
+    WallTheme("Néon", "neon", "111"),
+)
 val TABS = listOf("Tout", "Favoris", "Jeux", "Vidéo", "Musique")
 
 fun glow(c: Color, r: Float): Shadow? = if (LITE_MODE) null else Shadow(c, blurRadius = r)
@@ -149,6 +218,11 @@ object AppState {
     var menuOpen by mutableStateOf(false)
     var saver by mutableStateOf(false)
     var resumeTick by mutableStateOf(0)
+    var wallIndex by mutableStateOf(0)
+    var particleStyle by mutableStateOf(0)
+    var dimIndex by mutableStateOf(0)
+    var photoTick by mutableStateOf(0)
+    var saverBg by mutableStateOf(0)
 }
 
 class Store(ctx: Context) {
@@ -196,20 +270,24 @@ fun loadApps(ctx: Context): List<AppItem> {
 //  SONS SYNTHÉTISÉS (aucun fichier audio nécessaire)
 // =====================================================================
 class Sounds {
-    private fun build(freqs: List<Double>, ms: Int): AudioTrack {
-        val rate = 22050
+    private val rate = 22050
+
+    private fun build(
+        freqs: List<Double>, ms: Int,
+        usage: Int = AudioAttributes.USAGE_ASSISTANCE_SONIFICATION, loud: Double = 12000.0
+    ): AudioTrack {
         val n = rate * ms / 1000
         val segLen = n / freqs.size
         val data = ShortArray(n) { i ->
             val seg = minOf(i / segLen, freqs.size - 1)
             val j = i - seg * segLen
             val env = exp(-5.0 * j / segLen) * minOf(1.0, j / 120.0)
-            (sin(2 * PI * freqs[seg] * i / rate) * env * 12000).toInt().toShort()
+            (sin(2 * PI * freqs[seg] * i / rate) * env * loud).toInt().toShort()
         }
         val track = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                    .setUsage(usage)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
             )
             .setAudioFormat(
@@ -227,7 +305,6 @@ class Sounds {
     private val moveT = build(listOf(1175.0), 60)
     private val selectT = build(listOf(660.0, 990.0), 200)
     private val bootT = build(listOf(523.0, 659.0, 784.0, 1047.0), 700)
-
     private fun play(t: AudioTrack) {
         try { t.stop(); t.reloadStaticData(); t.play() } catch (ignored: Exception) {}
     }
@@ -291,6 +368,13 @@ fun rememberRates(): String {
     return text
 }
 
+@Suppress("DEPRECATION")
+fun wifiName(ctx: Context): String = try {
+    val wm = ctx.applicationContext.getSystemService(WifiManager::class.java)
+    val ssid = wm.connectionInfo?.ssid?.trim('"') ?: ""
+    if (ssid.isNotBlank() && ssid != "<unknown ssid>") "Wi-Fi : $ssid" else "Wi-Fi"
+} catch (ex: Exception) { "Wi-Fi" }
+
 @Composable
 fun rememberNetwork(): String {
     val ctx = LocalContext.current
@@ -301,7 +385,7 @@ fun rememberNetwork(): String {
             val caps = cm.getNetworkCapabilities(cm.activeNetwork)
             state = when {
                 caps == null -> "Hors ligne"
-                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> wifiName(ctx)
                 caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet"
                 else -> "Connecté"
             }
@@ -322,15 +406,15 @@ fun rememberNow(): Date {
 fun rememberWallpaper(): String? {
     val ctx = LocalContext.current
     var current by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(AppState.wallpaperSkip) {
+    LaunchedEffect(AppState.wallpaperSkip, AppState.wallIndex) {
         var queue = emptyList<String>()
         while (true) {
             if (queue.isEmpty()) {
                 queue = withContext(Dispatchers.IO) {
                     try {
                         val url = URL(
-                            "https://wallhaven.cc/api/v1/search?q=$WALLPAPER_QUERY" +
-                                "&categories=111&purity=100&sorting=random&atleast=1920x1080&page=1"
+                            "https://wallhaven.cc/api/v1/search?q=" + URLEncoder.encode(WALL_THEMES[AppState.wallIndex].query, "UTF-8") +
+                                "&categories=" + WALL_THEMES[AppState.wallIndex].cats + "&purity=100&sorting=random&atleast=1920x1080&page=1"
                         )
                         val arr = JSONObject(url.readText()).getJSONArray("data")
                         List(arr.length()) { arr.getJSONObject(it).getString("path") }
@@ -401,8 +485,8 @@ fun rememberBarca(): List<String> {
     return lines
 }
 
-fun wallpaperRequest(ctx: Context, url: String): ImageRequest =
-    ImageRequest.Builder(ctx).data(url)
+fun wallpaperRequest(ctx: Context, data: Any): ImageRequest =
+    ImageRequest.Builder(ctx).data(data)
         .apply { if (LITE_MODE) { size(1280, 720); allowRgb565(true) } }
         .build()
 
@@ -416,7 +500,16 @@ fun localIp(): String = try {
 // =====================================================================
 object Remote {
     private var server: ServerSocket? = null
-    private const val PAGE = """<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{background:#111;color:#fff;font-family:sans-serif;text-align:center}a,button{display:block;margin:14px auto;padding:18px;width:80%;font-size:22px;border-radius:12px;background:#ff2bd6;color:#fff;border:0;text-decoration:none}input{width:75%;padding:14px;font-size:20px}</style></head><body><h2>Ma TV</h2><a href="/theme">Changer de thème</a><a href="/bg">Changer de fond</a><a href="/next">Image suivante</a><a href="/saver">Écran de veille</a><form action="/msg"><input name="t" placeholder="Message sur la télé"><button>Envoyer</button></form></body></html>"""
+    @Volatile var photoDir: File? = null
+    @Volatile var quotesFile: File? = null
+
+    fun addQuote(q: String) {
+        val f = quotesFile ?: return
+        val t = q.replace("\n", " ").trim().take(200)
+        if (t.isNotEmpty()) { f.appendText(t + "\n"); AppState.photoTick++ }
+    }
+
+    private const val PAGE = """<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{background:#111;color:#fff;font-family:sans-serif;text-align:center}a,button{display:block;margin:12px auto;padding:16px;width:80%;font-size:20px;border-radius:12px;background:#ff2bd6;color:#fff;border:0;text-decoration:none}input[type=text]{width:75%;padding:14px;font-size:20px}input[type=file]{display:block;margin:10px auto;font-size:16px}</style></head><body><h2>Ma TV</h2><a href="/theme">Couleurs suivantes</a><a href="/bg">Changer de fond</a><a href="/wall">Thème d'images suivant</a><a href="/style">Particules suivantes</a><a href="/next">Image suivante</a><a href="/saver">Écran de veille</a><form action="/msg"><input type="text" name="t" placeholder="Message sur la télé"><button>Envoyer</button></form><form action="/addquote"><input type="text" name="t" placeholder="Ta citation pour la veille"><button>Ajouter la citation</button></form><h3>Envoyer des photos sur la télé</h3><input type="file" id="f" accept="image/*" multiple><button onclick="up()">Envoyer</button><p id="s"></p><script>async function up(){var fs=document.getElementById('f').files,s=document.getElementById('s');for(var i=0;i<fs.length;i++){s.textContent='Envoi '+(i+1)+'/'+fs.length+'...';await fetch('/upload?n='+Date.now()+'_'+i,{method:'POST',body:fs[i]});}s.textContent='Terminé ('+fs.length+' photo(s))';}</script></body></html>"""
 
     fun start() {
         if (server != null) return
@@ -432,23 +525,72 @@ object Remote {
         }
     }
 
+    private fun readLine(i: InputStream): String? {
+        val sb = StringBuilder()
+        while (true) {
+            val b = i.read()
+            if (b == -1) return if (sb.isEmpty()) null else sb.toString()
+            if (b == '\n'.code) return sb.toString().trimEnd('\r')
+            sb.append(b.toChar())
+        }
+    }
+
     private fun handle(c: Socket) {
         try {
             c.use {
-                val line = BufferedReader(InputStreamReader(it.getInputStream())).readLine() ?: return
+                val input = BufferedInputStream(it.getInputStream())
+                val line = readLine(input) ?: return
+                var len = 0L
+                while (true) {
+                    val h = readLine(input) ?: break
+                    if (h.isEmpty()) break
+                    if (h.startsWith("Content-Length:", ignoreCase = true)) {
+                        len = h.substringAfter(":").trim().toLongOrNull() ?: 0L
+                    }
+                }
                 val path = line.split(" ").getOrNull(1) ?: "/"
                 val cmd = path.substringBefore("?")
                 val arg = path.substringAfter("t=", "")
+                val out = it.getOutputStream()
+
+                if (cmd == "/upload") {
+                    val dir = photoDir
+                    var ok = false
+                    if (dir != null && len in 1..25_000_000L) {
+                        dir.mkdirs()
+                        val name = path.substringAfter("n=", "x")
+                            .filter { ch -> ch.isLetterOrDigit() || ch == '_' }.take(40)
+                        File(dir, "p_$name.img").outputStream().use { os ->
+                            val buf = ByteArray(8192)
+                            var left = len
+                            while (left > 0) {
+                                val n = input.read(buf, 0, minOf(buf.size.toLong(), left).toInt())
+                                if (n < 0) break
+                                os.write(buf, 0, n)
+                                left -= n
+                            }
+                        }
+                        AppState.photoTick++
+                        ok = true
+                    }
+                    val status = if (ok) "200 OK" else "400 Bad Request"
+                    out.write(("HTTP/1.1 $status\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok").toByteArray())
+                    out.flush()
+                    return
+                }
+
                 var redirect = true
                 when (cmd) {
                     "/theme" -> AppState.themeIndex = (AppState.themeIndex + 1) % THEMES.size
                     "/bg" -> AppState.bgMode = (AppState.bgMode + 1) % BG_MODES.size
+                    "/wall" -> AppState.wallIndex = (AppState.wallIndex + 1) % WALL_THEMES.size
+                    "/style" -> AppState.particleStyle = (AppState.particleStyle + 1) % PARTICLE_STYLES.size
                     "/next" -> AppState.wallpaperSkip++
                     "/saver" -> AppState.saver = true
                     "/msg" -> AppState.banner = URLDecoder.decode(arg, "UTF-8").take(120)
+                    "/addquote" -> addQuote(URLDecoder.decode(arg, "UTF-8"))
                     else -> redirect = false
                 }
-                val out = it.getOutputStream()
                 if (redirect) {
                     out.write("HTTP/1.1 303 See Other\r\nLocation: /\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
                 } else {
@@ -469,12 +611,24 @@ object Remote {
 //  ACTIVITÉ
 // =====================================================================
 class MainActivity : ComponentActivity() {
+    private val permLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val st = Store(this)
         AppState.themeIndex = st.int("theme").coerceIn(0, THEMES.lastIndex)
         AppState.bgMode = st.int("bg").coerceIn(0, BG_MODES.lastIndex)
+        AppState.wallIndex = st.int("wall").coerceIn(0, WALL_THEMES.lastIndex)
+        AppState.particleStyle = st.int("pstyle").coerceIn(0, PARTICLE_STYLES.lastIndex)
+        AppState.dimIndex = st.int("dim").coerceIn(0, DIM_LEVELS.lastIndex)
+        AppState.saverBg = st.int("sbg").coerceIn(0, SAVER_BGS.lastIndex)
+        Remote.photoDir = File(filesDir, "photos").apply { mkdirs() }
+        Remote.quotesFile = File(filesDir, "quotes.txt")
         Remote.start()
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            try { permLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION) } catch (ignored: Exception) {}
+        }
         setContent {
             val dm = resources.displayMetrics
             val base = LocalDensity.current
@@ -513,10 +667,13 @@ fun HomeScreen() {
     var optionsFor by remember { mutableStateOf<AppItem?>(null) }
     var soundOn by remember { mutableStateOf(false) }
     var lastKey by remember { mutableStateOf(System.currentTimeMillis()) }
+    var sub by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) { sounds.boot(); delay(800); soundOn = true }
-    LaunchedEffect(AppState.themeIndex, AppState.bgMode) {
+    LaunchedEffect(AppState.themeIndex, AppState.bgMode, AppState.wallIndex, AppState.particleStyle, AppState.dimIndex, AppState.saverBg) {
         store.putInt("theme", AppState.themeIndex); store.putInt("bg", AppState.bgMode)
+        store.putInt("wall", AppState.wallIndex); store.putInt("pstyle", AppState.particleStyle)
+        store.putInt("dim", AppState.dimIndex); store.putInt("sbg", AppState.saverBg)
     }
     LaunchedEffect(AppState.resumeTick) { lastKey = System.currentTimeMillis() }
     LaunchedEffect(Unit) {
@@ -580,20 +737,27 @@ fun HomeScreen() {
         val useVideo = AppState.bgMode == 1 && VIDEO_URLS.isNotEmpty()
         if (useVideo) VideoBg(VIDEO_URLS)
         Box(Modifier.fillMaxSize().graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)) {
-        if (!useVideo && AppState.bgMode != 2) Wallpaper(rememberWallpaper())
+        if (!useVideo && !AppState.saver) {
+            when (AppState.bgMode) {
+                0, 1 -> Wallpaper(rememberWallpaper())
+                3 -> Wallpaper(rememberPhotos())
+            }
+        }
         Box(
             Modifier.fillMaxSize().drawBehind {
-                drawRect(Color.Black.copy(alpha = 0.5f))
+                drawRect(Color.Black.copy(alpha = DIM_LEVELS[AppState.dimIndex]))
+                drawRect(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.45f), Color.Transparent), startY = 0f, endY = size.height * 0.35f))
+                drawRect(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f)), startY = size.height * 0.55f, endY = size.height))
                 drawRect(
                     Brush.radialGradient(
-                        listOf(accent.copy(alpha = 0.45f), Color.Transparent),
+                        listOf(accent.copy(alpha = 0.3f), Color.Transparent),
                         center = Offset(size.width * 0.3f, size.height * 0.8f),
                         radius = size.width * 0.75f
                     )
                 )
                 drawRect(
                     Brush.radialGradient(
-                        listOf(theme.second.copy(alpha = 0.22f), Color.Transparent),
+                        listOf(theme.second.copy(alpha = 0.14f), Color.Transparent),
                         center = Offset(size.width, 0f),
                         radius = size.width * 0.5f
                     )
@@ -623,6 +787,7 @@ fun HomeScreen() {
             Spacer(Modifier.height(10.dp))
             Text(
                 (if (focusedApp?.pkg in favs) "★ " else "") + (focusedApp?.label ?: ""),
+                modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.4f)).padding(horizontal = 14.dp, vertical = 4.dp),
                 style = TextStyle(
                     color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold,
                     shadow = glow(accent, 30f)
@@ -698,38 +863,72 @@ fun HomeScreen() {
     if (AppState.menuOpen) {
         Dialog(onDismissRequest = { AppState.menuOpen = false }) {
             Panel("Menu rapide", accent) { first ->
-                NeonButton("🔉 Volume −", accent, requester = first) {
-                    audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    NeonButton("🔉 Vol −", accent, Modifier.weight(1f), requester = first) {
+                        audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
+                    }
+                    NeonButton("🔊 Vol +", accent, Modifier.weight(1f)) {
+                        audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
+                    }
                 }
-                NeonButton("🔊 Volume +", accent) {
-                    audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
-                }
+                NeonButton("🎨 Apparence", accent) { AppState.menuOpen = false; sub = "look" }
+                NeonButton("📷 Photos et citations", accent) { AppState.menuOpen = false; sub = "photos" }
                 NeonButton("📶 Wi-Fi", accent) { ctx.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) }
-                NeonButton("⚙ Paramètres", accent) { ctx.startActivity(Intent(Settings.ACTION_SETTINGS)) }
-                NeonButton("🎨 Thème : ${theme.name}", accent) {
+                NeonButton("⚙ Paramètres de la télé", accent) { ctx.startActivity(Intent(Settings.ACTION_SETTINGS)) }
+                NeonButton("🌙 Écran de veille", accent) { AppState.menuOpen = false; AppState.saver = true }
+                NeonButton("👁 Réafficher les applis masquées", accent) {
+                    hidden = emptyList(); store.save("hidden", hidden)
+                }
+            }
+        }
+    }
+
+    // ----- Apparence -----
+    if (sub == "look") {
+        Dialog(onDismissRequest = { sub = "" }) {
+            Panel("🎨 Apparence", accent) { first ->
+                NeonButton("🎨 Couleurs : ${theme.name}", accent, requester = first) {
                     AppState.themeIndex = (AppState.themeIndex + 1) % THEMES.size
                 }
                 NeonButton("🖼 Fond : ${BG_MODES[AppState.bgMode]}", accent) {
                     AppState.bgMode = (AppState.bgMode + 1) % BG_MODES.size
                 }
+                NeonButton("🎌 Images : ${WALL_THEMES[AppState.wallIndex].name}", accent) {
+                    AppState.wallIndex = (AppState.wallIndex + 1) % WALL_THEMES.size
+                }
+                NeonButton("✨ Particules : ${PARTICLE_STYLES[AppState.particleStyle]}", accent) {
+                    AppState.particleStyle = (AppState.particleStyle + 1) % PARTICLE_STYLES.size
+                }
+                NeonButton("☀ Luminosité : ${DIM_NAMES[AppState.dimIndex]}", accent) {
+                    AppState.dimIndex = (AppState.dimIndex + 1) % DIM_LEVELS.size
+                }
+                NeonButton("💤 Fond de veille : ${SAVER_BGS[AppState.saverBg]}", accent) {
+                    AppState.saverBg = (AppState.saverBg + 1) % SAVER_BGS.size
+                }
+                NeonButton("🌙 Voir l'écran de veille", accent) { sub = ""; AppState.saver = true }
                 NeonButton("⏭ Image suivante", accent) { AppState.wallpaperSkip++ }
-                NeonButton("🌙 Veille (horloge)", accent) { AppState.menuOpen = false; AppState.saver = true }
-                NeonButton("🏠 Définir comme accueil par défaut", accent) {
-                    try {
-                        if (Build.VERSION.SDK_INT >= 29) {
-                            ctx.startActivity(ctx.getSystemService(RoleManager::class.java).createRequestRoleIntent(RoleManager.ROLE_HOME))
-                        } else {
-                            ctx.startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
-                        }
-                    } catch (ex: Exception) {
-                        try { ctx.startActivity(Intent(Settings.ACTION_HOME_SETTINGS)) }
-                        catch (ex2: Exception) { AppState.banner = "Indisponible sur cette télé : méthode ADB nécessaire" }
-                    }
+                NeonButton("Fermer", accent) { sub = "" }
+            }
+        }
+    }
+
+    // ----- Photos et citations -----
+    if (sub == "photos") {
+        Dialog(onDismissRequest = { sub = "" }) {
+            Panel("📷 Photos et citations", accent) { first ->
+                val count = remember(AppState.photoTick) { photoFiles().size }
+                val nq = remember(AppState.photoTick) { customQuotes().size }
+                Text("Sur ton téléphone (même Wi-Fi), ouvre :", color = Color.White, fontSize = 16.sp)
+                Text("http://${localIp()}:$REMOTE_PORT", color = accent, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text("Tu y envoies tes photos et tes citations.", color = Color.White, fontSize = 16.sp)
+                Text("Photos : $count   •   Citations perso : $nq", color = Color.White, fontSize = 18.sp)
+                NeonButton("🗑 Supprimer mes photos", accent, requester = first) {
+                    photoFiles().forEach { it.delete() }; AppState.photoTick++
                 }
-                NeonButton("👁 Réafficher les applis masquées", accent) {
-                    hidden = emptyList(); store.save("hidden", hidden)
+                NeonButton("🗑 Supprimer mes citations", accent) {
+                    Remote.quotesFile?.delete(); AppState.photoTick++
                 }
-                Text("📱 Téléphone : http://${localIp()}:$REMOTE_PORT", color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp)
+                NeonButton("Fermer", accent) { sub = "" }
             }
         }
     }
@@ -787,9 +986,12 @@ fun InfoPanel(accent: Color, modifier: Modifier) {
     val weather = rememberWeather()
     val network = rememberNetwork()
     val rates = rememberRates()
-    Column(modifier, horizontalAlignment = Alignment.End) {
+    Column(
+        modifier.clip(RoundedCornerShape(16.dp)).background(Color.Black.copy(alpha = 0.35f)).padding(14.dp),
+        horizontalAlignment = Alignment.End
+    ) {
         Text(
-            SimpleDateFormat("HH:mm", Locale.FRANCE).format(now),
+            SimpleDateFormat("HH:mm:ss", Locale.FRANCE).format(now),
             style = TextStyle(
                 color = Color.White, fontSize = 48.sp, fontWeight = FontWeight.Bold,
                 shadow = glow(accent, 28f)
@@ -808,29 +1010,56 @@ fun InfoPanel(accent: Color, modifier: Modifier) {
 @Composable
 fun ScreenSaver(accent: Color) {
     val now = rememberNow()
-    Box(
-        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.88f)),
-        contentAlignment = Alignment.Center
-    ) {
-        Particles(accent)
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    val hasPhotos = remember(AppState.photoTick) { photoFiles().isNotEmpty() }
+    val mode = when {
+        AppState.saverBg == 2 -> 2
+        AppState.saverBg == 0 && hasPhotos -> 0
+        else -> 1
+    }
+    val quotes = remember(AppState.photoTick) { allQuotes() }
+    var qi by remember { mutableStateOf(Random.nextInt(1000)) }
+    LaunchedEffect(Unit) { while (true) { delay(12_000); qi++ } }
+    val quote = quotes[qi % quotes.size]
+
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        Box(Modifier.fillMaxSize().graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)) {
+            when (mode) {
+                0 -> Wallpaper(rememberPhotos())
+                1 -> Wallpaper(rememberWallpaper())
+            }
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = if (mode == 2) 0.85f else 0.5f)))
+        }
+        if (mode == 2) Particles(accent)
+        Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                SimpleDateFormat("HH:mm", Locale.FRANCE).format(now),
+                SimpleDateFormat("HH:mm:ss", Locale.FRANCE).format(now),
                 style = TextStyle(
-                    color = Color.White, fontSize = 160.sp, fontWeight = FontWeight.Bold,
-                    shadow = glow(accent, 60f)
+                    color = Color.White, fontSize = 110.sp, fontWeight = FontWeight.Bold,
+                    shadow = glow(accent, 50f)
                 )
             )
             Text(
                 SimpleDateFormat("EEEE d MMMM", Locale.FRANCE).format(now).replaceFirstChar { it.uppercase() },
-                color = Color.White.copy(alpha = 0.8f), fontSize = 32.sp
+                color = Color.White.copy(alpha = 0.85f), fontSize = 28.sp
             )
+            Spacer(Modifier.height(30.dp))
+            Crossfade(targetState = quote, animationSpec = tween(if (LITE_MODE) 400 else 1200), label = "quote") { q ->
+                Text(
+                    "« " + q + " »",
+                    modifier = Modifier.widthIn(max = 900.dp).padding(horizontal = 48.dp),
+                    style = TextStyle(
+                        color = Color.White, fontSize = 30.sp, fontStyle = FontStyle.Italic,
+                        textAlign = TextAlign.Center, shadow = glow(accent, 16f)
+                    )
+                )
+            }
         }
     }
 }
 
 @Composable
-fun Particles(color: Color, count: Int = if (LITE_MODE) 12 else 60) {
+fun Particles(color: Color, count: Int = if (LITE_MODE) 20 else 60) {
+    val style = AppState.particleStyle
     val t by rememberInfiniteTransition(label = "p").animateFloat(
         initialValue = 0f, targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(30000, easing = LinearEasing)), label = "t"
@@ -841,12 +1070,71 @@ fun Particles(color: Color, count: Int = if (LITE_MODE) 12 else 60) {
         }
     }
     Canvas(Modifier.fillMaxSize()) {
+        val w = size.width
+        val h = size.height
         seeds.forEach { s ->
-            val y = ((s[1] - t * s[2]) % 1f + 1f) % 1f
-            val x = s[0] + 0.02f * sin((t * 3f * s[2] + s[0]) * 6.2832f)
-            drawCircle(color.copy(alpha = 0.25f + 0.05f * s[3]), s[3] * 2.5f, Offset(x * size.width, y * size.height))
+            val k = s[2]
+            val sz = s[3]
+            when (style) {
+                1 -> { // pluie néon
+                    val y = (s[1] + t * k) % 1f
+                    drawLine(color.copy(alpha = 0.55f), Offset(s[0] * w, y * h), Offset(s[0] * w, y * h + 14f * sz), strokeWidth = 2.5f)
+                }
+                2 -> { // neige
+                    val y = (s[1] + t) % 1f
+                    val x = s[0] + 0.03f * sin((t * 2f * k + s[0]) * 6.2832f)
+                    drawCircle(Color.White.copy(alpha = 0.7f), sz * 2.2f, Offset(x * w, y * h))
+                }
+                3 -> { // bulles
+                    val y = ((s[1] - t) % 1f + 1f) % 1f
+                    val x = s[0] + 0.02f * sin((t * 2f * k + s[0]) * 6.2832f)
+                    drawCircle(color.copy(alpha = 0.6f), sz * 7f, Offset(x * w, y * h), style = Stroke(width = 2.5f))
+                }
+                4 -> { // lucioles
+                    val x = 0.5f + 0.45f * sin((t * k + s[0]) * 6.2832f)
+                    val y = 0.5f + 0.4f * sin((t * (k + 1f) + s[1]) * 6.2832f)
+                    val a = 0.25f + 0.5f * (0.5f + 0.5f * sin((t * 3f * k + s[0]) * 6.2832f))
+                    drawCircle(color.copy(alpha = a), sz * 3.5f, Offset(x * w, y * h))
+                }
+                5 -> { // matrix
+                    val col = (s[0] * 40f).toInt() / 40f
+                    val y = (s[1] + t * k) % 1f
+                    for (j in 0..3) {
+                        drawCircle(color.copy(alpha = 0.7f - j * 0.17f), 3f, Offset(col * w, ((y - j * 0.025f + 1f) % 1f) * h))
+                    }
+                }
+                else -> { // étoiles
+                    val y = ((s[1] - t * k) % 1f + 1f) % 1f
+                    val x = s[0] + 0.02f * sin((t * 3f * k + s[0]) * 6.2832f)
+                    drawCircle(color.copy(alpha = 0.25f + 0.05f * sz), sz * 2.5f, Offset(x * w, y * h))
+                }
+            }
         }
     }
+}
+
+fun customQuotes(): List<String> =
+    Remote.quotesFile?.takeIf { it.exists() }?.readLines()?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
+
+fun allQuotes(): List<String> = QUOTES + customQuotes()
+
+fun photoFiles(): List<File> =
+    Remote.photoDir?.listFiles()?.filter { it.isFile }?.sortedBy { it.name } ?: emptyList()
+
+@Composable
+fun rememberPhotos(): String? {
+    var current by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(AppState.wallpaperSkip, AppState.photoTick) {
+        var idx = Random.nextInt(1000)
+        while (true) {
+            val files = photoFiles()
+            if (files.isEmpty()) { current = null; delay(3000); continue }
+            current = files[idx % files.size].absolutePath
+            idx++
+            delay(WALLPAPER_DELAY_MS)
+        }
+    }
+    return current
 }
 
 @Composable
@@ -855,7 +1143,7 @@ fun Wallpaper(url: String?) {
     Crossfade(targetState = url, animationSpec = tween(if (LITE_MODE) 700 else 1500), label = "wallpaper") { u ->
         if (u != null) {
             AsyncImage(
-                model = wallpaperRequest(ctx, u),
+                model = wallpaperRequest(ctx, if (u.startsWith("http")) u else File(u)),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
@@ -908,6 +1196,8 @@ fun NeonButton(
 fun Panel(title: String, accent: Color, content: @Composable ColumnScope.(FocusRequester) -> Unit) {
     val first = remember { FocusRequester() }
     LaunchedEffect(Unit) { delay(150); try { first.requestFocus() } catch (ignored: Exception) {} }
+    val view = LocalView.current
+    SideEffect { (view.parent as? DialogWindowProvider)?.window?.setDimAmount(0f) }
     Column(
         Modifier
             .clip(RoundedCornerShape(20.dp))
