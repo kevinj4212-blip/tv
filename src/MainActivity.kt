@@ -27,6 +27,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -49,6 +51,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -56,11 +59,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -132,9 +137,9 @@ const val WALLPAPER_QUERY = "neon"        // "" = tout, ou "cyberpunk", "space",
 const val WALLPAPER_DELAY_MS = 10_000L    // changement de fond toutes les 10 s
 const val SCREENSAVER_AFTER_MS = 3 * 60_000L
 const val REMOTE_PORT = 8080              // contrôle depuis le téléphone
-const val LITE_MODE = true                // télé à 1 Go de RAM : effets allégés (mets false pour tout activer)
+val LITE_MODE: Boolean get() = AppState.fx == 0   // effets légers (réglage dans Menu > Réglages)
 const val BARCA_ID = "133739"             // FC Barcelone sur TheSportsDB (à vérifier, voir message)
-const val SPORTSDB_KEY = "3"              // clé de test gratuite de TheSportsDB
+const val SPORTSDB_KEY = "123"            // clé publique gratuite de TheSportsDB
 val VIDEO_URLS = listOf<String>()         // liens directs .mp4 (optionnel) pour le fond vidéo
 
 data class Theme(val name: String, val color: Color?, val second: Color, val base: Color)
@@ -152,6 +157,21 @@ val THEMES = listOf(
     Theme("Or royal", Color(0xFFFFC400), Color(0xFF6D4C41), Color(0xFF0B0802)),
     Theme("Cyan électrique", Color(0xFF00E5FF), Color(0xFF2979FF), Color(0xFF01080F)),
     Theme("Vert toxique", Color(0xFFB2FF59), Color(0xFF00BFA5), Color(0xFF030A02)),
+    Theme("Lave", Color(0xFFFF6D00), Color(0xFFD50000), Color(0xFF0D0300)),
+    Theme("Océan", Color(0xFF00B0FF), Color(0xFF304FFE), Color(0xFF010612)),
+    Theme("Forêt", Color(0xFF00C853), Color(0xFF76FF03), Color(0xFF020A05)),
+    Theme("Sakura", Color(0xFFFF80AB), Color(0xFFE040FB), Color(0xFF12040A)),
+    Theme("Galaxie", Color(0xFF7C4DFF), Color(0xFFFF4081), Color(0xFF05020F)),
+    Theme("Cyberpunk", Color(0xFFFFEA00), Color(0xFFFF00E5), Color(0xFF08000F)),
+    Theme("Rétro 80s", Color(0xFFFF2975), Color(0xFF00F0FF), Color(0xFF0B0224)),
+    Theme("Menthe", Color(0xFF64FFDA), Color(0xFF18FFFF), Color(0xFF021210)),
+    Theme("Glace polaire", Color(0xFFE0F7FA), Color(0xFF80DEEA), Color(0xFF03101A)),
+    Theme("Feu bleu", Color(0xFF2979FF), Color(0xFFFF6D00), Color(0xFF020610)),
+    Theme("Blanc pur", Color(0xFFFFFFFF), Color(0xFFB0BEC5), Color(0xFF0A0A0A)),
+    Theme("Mandarine", Color(0xFFFFA000), Color(0xFFFF5722), Color(0xFF0F0700)),
+    Theme("Raisin", Color(0xFFAB47BC), Color(0xFF5C6BC0), Color(0xFF0B0310)),
+    Theme("Émeraude", Color(0xFF00E676), Color(0xFF1DE9B6), Color(0xFF01100A)),
+    Theme("Personnalisé", Color(0xFFFFFFFF), Color(0xFFFFFFFF), Color(0xFF000000)),
 )
 val BG_MODES = listOf("Images", "Vidéo", "Particules", "Mes photos")
 val PARTICLE_STYLES = listOf("Étoiles", "Pluie néon", "Neige", "Bulles", "Lucioles", "Matrix")
@@ -193,6 +213,8 @@ val QUOTES = listOf(
 data class WallTheme(val name: String, val query: String, val cats: String)
 
 val WALL_THEMES = listOf(
+    WallTheme("Mélange animés + dessins animés", "naruto|one piece|dragon ball|demon slayer|attack on titan|jujutsu kaisen|bleach|my hero academia|hunter x hunter|studio ghibli|cartoon|simpsons|adventure time|spongebob", "111"),
+    WallTheme("Tous les animés", "", "010"),
     WallTheme("Naruto", "naruto", "010"),
     WallTheme("One Piece", "one piece", "010"),
     WallTheme("Dragon Ball", "dragon ball", "010"),
@@ -200,12 +222,72 @@ val WALL_THEMES = listOf(
     WallTheme("Attack on Titan", "attack on titan", "010"),
     WallTheme("Jujutsu Kaisen", "jujutsu kaisen", "010"),
     WallTheme("Bleach", "bleach", "010"),
-    WallTheme("Anime (mélange)", "", "010"),
+    WallTheme("My Hero Academia", "my hero academia", "010"),
+    WallTheme("Hunter x Hunter", "hunter x hunter", "010"),
+    WallTheme("Fullmetal Alchemist", "fullmetal alchemist", "010"),
+    WallTheme("Death Note", "death note", "010"),
+    WallTheme("Tokyo Ghoul", "tokyo ghoul", "010"),
+    WallTheme("One Punch Man", "one punch man", "010"),
+    WallTheme("Sword Art Online", "sword art online", "010"),
+    WallTheme("Fairy Tail", "fairy tail", "010"),
+    WallTheme("Black Clover", "black clover", "010"),
+    WallTheme("Chainsaw Man", "chainsaw man", "010"),
+    WallTheme("Spy x Family", "spy x family", "010"),
+    WallTheme("Haikyuu", "haikyuu", "010"),
+    WallTheme("Evangelion", "evangelion", "010"),
+    WallTheme("Cowboy Bebop", "cowboy bebop", "010"),
+    WallTheme("Studio Ghibli", "studio ghibli", "010"),
+    WallTheme("Pokémon", "pokemon", "010"),
+    WallTheme("Dessins animés (cartoons)", "cartoon|looney tunes|tom and jerry|simpsons|futurama|adventure time|spongebob|rick and morty|gravity falls|steven universe", "111"),
+    WallTheme("Disney / Pixar", "disney|pixar|frozen|lion king", "111"),
+    WallTheme("Super-héros (comics)", "spiderman|batman|superman|avengers", "111"),
+    WallTheme("Chibi / Kawaii", "chibi|kawaii", "010"),
+    WallTheme("Pixel art", "pixel art", "111"),
     WallTheme("Néon", "neon", "111"),
+    WallTheme("Cyberpunk (ville)", "cyberpunk", "111"),
 )
+
+data class City(val name: String, val lat: Double, val lon: Double)
+
+val CITIES = listOf(
+    City("Abidjan (Koumassi)", 5.30, -3.95), City("Bouaké", 7.69, -5.03), City("Yamoussoukro", 6.82, -5.28),
+    City("San-Pédro", 4.75, -6.65), City("Korhogo", 9.46, -5.63), City("Dakar", 14.69, -17.44),
+    City("Accra", 5.60, -0.19), City("Lagos", 6.52, 3.38), City("Casablanca", 33.57, -7.59),
+    City("Paris", 48.85, 2.35), City("Bruxelles", 50.85, 4.35), City("Barcelone", 41.39, 2.17),
+    City("Montréal", 45.50, -73.57),
+)
+
+val FX_NAMES = listOf("Léger", "Normal", "Max")
+val WALL_DELAYS = listOf(10, 5, 20, 30, 60)
+val TILE_NAMES = listOf("Moyenne", "Petite", "Grande")
+val TILE_SCALES = listOf(1f, 0.85f, 1.1f)
+val FOCUS_STYLES = listOf("PS5", "Simple", "Aucune")
+val SAVER_MINUTES = listOf(3, 1, 5, 10, 0)
+const val CUSTOM_NAME = "Personnalisé"
 val TABS = listOf("Tout", "Favoris", "Jeux", "Vidéo", "Musique")
 
 fun glow(c: Color, r: Float): Shadow? = if (LITE_MODE) null else Shadow(c, blurRadius = r)
+
+fun hsvColor(h: Float, sat: Float, v: Float): Color =
+    Color(android.graphics.Color.HSVToColor(floatArrayOf(h, sat, v)))
+
+fun resolveTheme(i: Int): Theme {
+    val t = THEMES[i]
+    if (t.name != CUSTOM_NAME) return t
+    val h = AppState.hue.toFloat()
+    return Theme(CUSTOM_NAME, hsvColor(h, 0.9f, 1f), hsvColor((h + 50f) % 360f, 0.8f, 1f), hsvColor(h, 0.6f, 0.07f))
+}
+
+fun timeFormat(): String = when {
+    AppState.h12 && AppState.hideSec -> "hh:mm a"
+    AppState.h12 -> "hh:mm:ss a"
+    AppState.hideSec -> "HH:mm"
+    else -> "HH:mm:ss"
+}
+
+fun onOff(b: Boolean) = if (b) "oui" else "non"
+
+fun saverLabel(i: Int): String = if (SAVER_MINUTES[i] == 0) "jamais" else SAVER_MINUTES[i].toString() + " min"
 
 // =====================================================================
 //  ÉTAT PARTAGÉ (UI + télécommande téléphone)
@@ -223,6 +305,55 @@ object AppState {
     var dimIndex by mutableStateOf(0)
     var photoTick by mutableStateOf(0)
     var saverBg by mutableStateOf(0)
+    var fx by mutableStateOf(0)
+    var delayIndex by mutableStateOf(0)
+    var tileIndex by mutableStateOf(0)
+    var focusStyle by mutableStateOf(0)
+    var hue by mutableStateOf(0)
+    var h12 by mutableStateOf(false)
+    var hideSec by mutableStateOf(false)
+    var hideBarca by mutableStateOf(false)
+    var hideRates by mutableStateOf(false)
+    var mute by mutableStateOf(false)
+    var cityIndex by mutableStateOf(0)
+    var saverDelay by mutableStateOf(0)
+
+    private fun b(x: Boolean) = if (x) 1 else 0
+    private val keys = listOf(
+        "theme", "bg", "wall", "pstyle", "dim", "sbg", "fx", "delay", "tile", "focus",
+        "hue", "h12", "hidesec", "hidebarca", "hiderates", "mute", "city", "sdelay"
+    )
+
+    fun all(): List<Int> = listOf(
+        themeIndex, bgMode, wallIndex, particleStyle, dimIndex, saverBg, fx, delayIndex, tileIndex, focusStyle,
+        hue, b(h12), b(hideSec), b(hideBarca), b(hideRates), b(mute), cityIndex, saverDelay
+    )
+
+    fun save(st: Store) {
+        val v = all()
+        keys.forEachIndexed { i, k -> st.putInt(k, v[i]) }
+    }
+
+    fun load(st: Store) {
+        themeIndex = st.int("theme").coerceIn(0, THEMES.lastIndex)
+        bgMode = st.int("bg").coerceIn(0, BG_MODES.lastIndex)
+        wallIndex = st.int("wall").coerceIn(0, WALL_THEMES.lastIndex)
+        particleStyle = st.int("pstyle").coerceIn(0, PARTICLE_STYLES.lastIndex)
+        dimIndex = st.int("dim").coerceIn(0, DIM_LEVELS.lastIndex)
+        saverBg = st.int("sbg").coerceIn(0, SAVER_BGS.lastIndex)
+        fx = st.int("fx").coerceIn(0, FX_NAMES.lastIndex)
+        delayIndex = st.int("delay").coerceIn(0, WALL_DELAYS.lastIndex)
+        tileIndex = st.int("tile").coerceIn(0, TILE_SCALES.lastIndex)
+        focusStyle = st.int("focus").coerceIn(0, FOCUS_STYLES.lastIndex)
+        hue = st.int("hue").coerceIn(0, 359)
+        h12 = st.int("h12") == 1
+        hideSec = st.int("hidesec") == 1
+        hideBarca = st.int("hidebarca") == 1
+        hideRates = st.int("hiderates") == 1
+        mute = st.int("mute") == 1
+        cityIndex = st.int("city").coerceIn(0, CITIES.lastIndex)
+        saverDelay = st.int("sdelay").coerceIn(0, SAVER_MINUTES.lastIndex)
+    }
 }
 
 class Store(ctx: Context) {
@@ -321,12 +452,12 @@ class Sounds {
 @Composable
 fun rememberWeather(): String {
     var text by remember { mutableStateOf("--") }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(AppState.cityIndex) {
         while (true) {
             text = withContext(Dispatchers.IO) {
                 try {
                     val url = URL(
-                        "https://api.open-meteo.com/v1/forecast?latitude=$LAT&longitude=$LON" +
+                        "https://api.open-meteo.com/v1/forecast?latitude=${CITIES[AppState.cityIndex].lat}&longitude=${CITIES[AppState.cityIndex].lon}" +
                             "&current=temperature_2m,weather_code"
                     )
                     val cur = JSONObject(url.readText()).getJSONObject("current")
@@ -413,7 +544,7 @@ fun rememberWallpaper(): String? {
                 queue = withContext(Dispatchers.IO) {
                     try {
                         val url = URL(
-                            "https://wallhaven.cc/api/v1/search?q=" + URLEncoder.encode(WALL_THEMES[AppState.wallIndex].query, "UTF-8") +
+                            "https://wallhaven.cc/api/v1/search?q=" + URLEncoder.encode(WALL_THEMES[AppState.wallIndex].query.split("|").random(), "UTF-8") +
                                 "&categories=" + WALL_THEMES[AppState.wallIndex].cats + "&purity=100&sorting=random&atleast=1920x1080&page=1"
                         )
                         val arr = JSONObject(url.readText()).getJSONArray("data")
@@ -427,15 +558,38 @@ fun rememberWallpaper(): String? {
             queue.firstOrNull()?.let {
                 ctx.imageLoader.enqueue(wallpaperRequest(ctx, it))
             }
-            delay(WALLPAPER_DELAY_MS)
+            delay(WALL_DELAYS[AppState.delayIndex] * 1000L)
         }
     }
     return current
 }
 
 // ---------- Barça (TheSportsDB, gratuit) ----------
-fun fetchEvents(path: String): List<JSONObject> {
-    val j = JSONObject(URL("https://www.thesportsdb.com/api/v1/json/$SPORTSDB_KEY/$path?id=$BARCA_ID").readText())
+@Volatile private var barcaIdCache: String? = null
+
+// Cherche automatiquement l'identifiant du FC Barcelone (football, Espagne, La Liga)
+fun barcaId(): String {
+    barcaIdCache?.let { return it }
+    try {
+        val j = JSONObject(URL("https://www.thesportsdb.com/api/v1/json/$SPORTSDB_KEY/searchteams.php?t=Barcelona").readText())
+        val arr = j.optJSONArray("teams")
+        if (arr != null) {
+            val teams = List(arr.length()) { arr.getJSONObject(it) }
+            val liga = teams.filter {
+                it.optString("strSport") == "Soccer" && it.optString("strCountry") == "Spain" &&
+                    it.optString("strLeague").contains("La Liga", ignoreCase = true)
+            }
+            val best = liga.firstOrNull { it.optString("strTeam") == "Barcelona" || it.optString("strTeam") == "FC Barcelona" }
+                ?: liga.firstOrNull()
+            val id = best?.optString("idTeam").orEmpty()
+            if (id.isNotEmpty()) { barcaIdCache = id; return id }
+        }
+    } catch (ex: Exception) {}
+    return BARCA_ID
+}
+
+fun fetchEvents(path: String, id: String): List<JSONObject> {
+    val j = JSONObject(URL("https://www.thesportsdb.com/api/v1/json/$SPORTSDB_KEY/$path?id=$id").readText())
     val arr: JSONArray = j.optJSONArray("events") ?: j.optJSONArray("results") ?: return emptyList()
     return List(arr.length()) { arr.getJSONObject(it) }
 }
@@ -455,19 +609,27 @@ fun rememberBarca(): List<String> {
             val result = withContext(Dispatchers.IO) {
                 val out = mutableListOf<String>()
                 var nextEvent: JSONObject? = null
+                var err = ""
+                val id = barcaId()
                 try {
-                    nextEvent = fetchEvents("eventsnext.php").minByOrNull { it.optString("dateEvent") }
+                    nextEvent = fetchEvents("eventsnext.php", id).minByOrNull { it.optString("dateEvent") }
                     nextEvent?.let { e ->
                         val d = matchDate(e)?.let { SimpleDateFormat("EEE d MMM HH:mm", Locale.FRANCE).format(it) } ?: e.optString("dateEvent")
                         out.add("Prochain : ${e.optString("strHomeTeam")} - ${e.optString("strAwayTeam")}  •  $d")
                     }
-                } catch (ex: Exception) {}
+                } catch (ex: Exception) {
+                    err = ex.javaClass.simpleName + " " + (ex.message ?: "").take(50)
+                }
                 try {
-                    fetchEvents("eventslast.php").maxByOrNull { it.optString("dateEvent") }?.let { e ->
+                    fetchEvents("eventslast.php", id).maxByOrNull { it.optString("dateEvent") }?.let { e ->
                         out.add("Dernier : ${e.optString("strHomeTeam")} ${e.optString("intHomeScore")}-${e.optString("intAwayScore")} ${e.optString("strAwayTeam")}")
                     }
-                } catch (ex: Exception) {}
-                Pair(out, nextEvent)
+                } catch (ex: Exception) {
+                    if (err.isEmpty()) err = ex.javaClass.simpleName + " " + (ex.message ?: "").take(50)
+                }
+                val ok = out.isNotEmpty()
+                if (!ok) out.add(if (err.isNotEmpty()) "Erreur : $err" else "Aucun match trouvé (équipe $id)")
+                Triple(out, nextEvent, ok)
             }
             lines = result.first
             // alerte 20 min avant le coup d'envoi
@@ -479,7 +641,7 @@ fun rememberBarca(): List<String> {
                     AppState.banner = "⚽ ${e.optString("strHomeTeam")} - ${e.optString("strAwayTeam")} dans ${diff / 60_000} min !"
                 }
             }
-            delay(if (lines.isEmpty()) 60_000L else 5 * 60_000L)
+            delay(if (result.third) 5 * 60_000L else 60_000L)
         }
     }
     return lines
@@ -617,12 +779,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val st = Store(this)
-        AppState.themeIndex = st.int("theme").coerceIn(0, THEMES.lastIndex)
-        AppState.bgMode = st.int("bg").coerceIn(0, BG_MODES.lastIndex)
-        AppState.wallIndex = st.int("wall").coerceIn(0, WALL_THEMES.lastIndex)
-        AppState.particleStyle = st.int("pstyle").coerceIn(0, PARTICLE_STYLES.lastIndex)
-        AppState.dimIndex = st.int("dim").coerceIn(0, DIM_LEVELS.lastIndex)
-        AppState.saverBg = st.int("sbg").coerceIn(0, SAVER_BGS.lastIndex)
+        AppState.load(st)
         Remote.photoDir = File(filesDir, "photos").apply { mkdirs() }
         Remote.quotesFile = File(filesDir, "quotes.txt")
         Remote.start()
@@ -669,17 +826,14 @@ fun HomeScreen() {
     var lastKey by remember { mutableStateOf(System.currentTimeMillis()) }
     var sub by remember { mutableStateOf("") }
 
-    LaunchedEffect(Unit) { sounds.boot(); delay(800); soundOn = true }
-    LaunchedEffect(AppState.themeIndex, AppState.bgMode, AppState.wallIndex, AppState.particleStyle, AppState.dimIndex, AppState.saverBg) {
-        store.putInt("theme", AppState.themeIndex); store.putInt("bg", AppState.bgMode)
-        store.putInt("wall", AppState.wallIndex); store.putInt("pstyle", AppState.particleStyle)
-        store.putInt("dim", AppState.dimIndex); store.putInt("sbg", AppState.saverBg)
-    }
+    LaunchedEffect(Unit) { if (!AppState.mute) sounds.boot(); delay(800); soundOn = true }
+    LaunchedEffect(AppState.all()) { AppState.save(store) }
     LaunchedEffect(AppState.resumeTick) { lastKey = System.currentTimeMillis() }
     LaunchedEffect(Unit) {
         while (true) {
             delay(5000)
-            if (!AppState.saver && System.currentTimeMillis() - lastKey > SCREENSAVER_AFTER_MS) AppState.saver = true
+            val mins = SAVER_MINUTES[AppState.saverDelay]
+            if (mins > 0 && !AppState.saver && System.currentTimeMillis() - lastKey > mins * 60_000L) AppState.saver = true
         }
     }
     LaunchedEffect(AppState.banner) { if (AppState.banner != null) { delay(6000); AppState.banner = null } }
@@ -700,13 +854,14 @@ fun HomeScreen() {
     }
     val recentApps = recents.mapNotNull { p -> ordered.find { it.pkg == p } }.take(8)
 
-    val theme = THEMES[AppState.themeIndex]
+    val theme = resolveTheme(AppState.themeIndex)
+    val ts = TILE_SCALES[AppState.tileIndex]
     val accent by animateColorAsState(
         theme.color ?: focusedApp?.accent ?: NEON_DEFAULT, if (LITE_MODE) snap() else tween(600), label = "accent"
     )
 
     val launch: (AppItem) -> Unit = { app ->
-        sounds.select()
+        if (!AppState.mute) sounds.select()
         recents = (listOf(app.pkg) + recents.filter { it != app.pkg }).take(10)
         store.save("recent", recents)
         val i = ctx.packageManager.getLeanbackLaunchIntentForPackage(app.pkg)
@@ -768,7 +923,7 @@ fun HomeScreen() {
         if (AppState.bgMode == 2) Particles(accent)
 
         InfoPanel(accent, Modifier.align(Alignment.TopEnd).padding(40.dp))
-        BarcaCard(accent, Modifier.align(Alignment.TopCenter).padding(top = 110.dp))
+        if (!AppState.hideBarca) BarcaCard(accent, Modifier.align(Alignment.TopCenter).padding(top = 110.dp))
 
         // Grand aperçu de l'appli sélectionnée
         Column(Modifier.align(Alignment.TopStart).padding(start = 80.dp, top = 40.dp)) {
@@ -811,12 +966,12 @@ fun HomeScreen() {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 item {
-                    NeonButton("⚡ Menu", accent, Modifier.size(120.dp, 112.dp)) { AppState.menuOpen = true }
+                    NeonButton("⚡ Menu", accent, Modifier.size(120.dp * ts, 112.dp * ts)) { AppState.menuOpen = true }
                 }
                 itemsIndexed(apps, key = { _, a -> a.pkg }) { index, app ->
                     AppTile(
                         app, if (index == 0) firstTile else null,
-                        onFocus = { focusedApp = app; if (soundOn) sounds.move() },
+                        onFocus = { focusedApp = app; if (soundOn && !AppState.mute) sounds.move() },
                         onClick = { launch(app) }
                     )
                 }
@@ -830,8 +985,8 @@ fun HomeScreen() {
                 ) {
                     itemsIndexed(recentApps, key = { _, a -> "r" + a.pkg }) { _, app ->
                         AppTile(
-                            app, null, 140.dp, 79.dp,
-                            onFocus = { focusedApp = app; if (soundOn) sounds.move() },
+                            app, null, 140.dp * ts, 79.dp * ts,
+                            onFocus = { focusedApp = app; if (soundOn && !AppState.mute) sounds.move() },
                             onClick = { launch(app) }
                         )
                     }
@@ -872,6 +1027,7 @@ fun HomeScreen() {
                     }
                 }
                 NeonButton("🎨 Apparence", accent) { AppState.menuOpen = false; sub = "look" }
+                NeonButton("⚙ Réglages", accent) { AppState.menuOpen = false; sub = "settings" }
                 NeonButton("📷 Photos et citations", accent) { AppState.menuOpen = false; sub = "photos" }
                 NeonButton("📶 Wi-Fi", accent) { ctx.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) }
                 NeonButton("⚙ Paramètres de la télé", accent) { ctx.startActivity(Intent(Settings.ACTION_SETTINGS)) }
@@ -887,15 +1043,11 @@ fun HomeScreen() {
     if (sub == "look") {
         Dialog(onDismissRequest = { sub = "" }) {
             Panel("🎨 Apparence", accent) { first ->
-                NeonButton("🎨 Couleurs : ${theme.name}", accent, requester = first) {
-                    AppState.themeIndex = (AppState.themeIndex + 1) % THEMES.size
-                }
+                NeonButton("🎨 Couleurs : ${theme.name}", accent, requester = first, dot = accent) { sub = "colors" }
                 NeonButton("🖼 Fond : ${BG_MODES[AppState.bgMode]}", accent) {
                     AppState.bgMode = (AppState.bgMode + 1) % BG_MODES.size
                 }
-                NeonButton("🎌 Images : ${WALL_THEMES[AppState.wallIndex].name}", accent) {
-                    AppState.wallIndex = (AppState.wallIndex + 1) % WALL_THEMES.size
-                }
+                NeonButton("🎌 Univers d'images : ${WALL_THEMES[AppState.wallIndex].name}", accent) { sub = "walls" }
                 NeonButton("✨ Particules : ${PARTICLE_STYLES[AppState.particleStyle]}", accent) {
                     AppState.particleStyle = (AppState.particleStyle + 1) % PARTICLE_STYLES.size
                 }
@@ -910,6 +1062,64 @@ fun HomeScreen() {
                 NeonButton("Fermer", accent) { sub = "" }
             }
         }
+    }
+
+    // ----- Réglages -----
+    if (sub == "settings") {
+        Dialog(onDismissRequest = { sub = "" }) {
+            Panel("⚙ Réglages", accent) { first ->
+                NeonButton("⚡ Effets : ${FX_NAMES[AppState.fx]}", accent, requester = first) {
+                    AppState.fx = (AppState.fx + 1) % FX_NAMES.size
+                }
+                NeonButton("🎬 Animation de sélection : ${FOCUS_STYLES[AppState.focusStyle]}", accent) {
+                    AppState.focusStyle = (AppState.focusStyle + 1) % FOCUS_STYLES.size
+                }
+                NeonButton("🔲 Taille des tuiles : ${TILE_NAMES[AppState.tileIndex]}", accent) {
+                    AppState.tileIndex = (AppState.tileIndex + 1) % TILE_SCALES.size
+                }
+                NeonButton("⏱ Changement de fond : ${WALL_DELAYS[AppState.delayIndex]} s", accent) {
+                    AppState.delayIndex = (AppState.delayIndex + 1) % WALL_DELAYS.size
+                }
+                NeonButton("🕒 Format de l'heure : ${if (AppState.h12) "12 h" else "24 h"}", accent) { AppState.h12 = !AppState.h12 }
+                NeonButton("⏲ Afficher les secondes : ${onOff(!AppState.hideSec)}", accent) { AppState.hideSec = !AppState.hideSec }
+                NeonButton("⚽ Carte Barça : ${onOff(!AppState.hideBarca)}", accent) { AppState.hideBarca = !AppState.hideBarca }
+                NeonButton("💱 Taux de change : ${onOff(!AppState.hideRates)}", accent) { AppState.hideRates = !AppState.hideRates }
+                NeonButton("🌦 Ville de la météo : ${CITIES[AppState.cityIndex].name}", accent) { sub = "cities" }
+                NeonButton("🔊 Sons : ${onOff(!AppState.mute)}", accent) { AppState.mute = !AppState.mute }
+                NeonButton("💤 Veille après : ${saverLabel(AppState.saverDelay)}", accent) {
+                    AppState.saverDelay = (AppState.saverDelay + 1) % SAVER_MINUTES.size
+                }
+                NeonButton("Fermer", accent) { sub = "" }
+            }
+        }
+    }
+
+    // ----- Choix : couleurs, univers d'images, villes -----
+    if (sub == "colors") {
+        PickDialog(
+            "🎨 Couleurs", THEMES.map { it.name }, AppState.themeIndex, accent,
+            THEMES.indices.map { resolveTheme(it).color ?: NEON_DEFAULT },
+            { AppState.themeIndex = it }, { sub = "look" }
+        ) {
+            if (theme.name == CUSTOM_NAME) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    NeonButton("◀ Teinte", accent, Modifier.weight(1f), dot = accent) { AppState.hue = (AppState.hue + 345) % 360 }
+                    NeonButton("Teinte ▶", accent, Modifier.weight(1f), dot = accent) { AppState.hue = (AppState.hue + 15) % 360 }
+                }
+            }
+        }
+    }
+    if (sub == "walls") {
+        PickDialog(
+            "🎌 Univers d'images", WALL_THEMES.map { it.name }, AppState.wallIndex, accent, null,
+            { AppState.wallIndex = it }, { sub = "look" }
+        )
+    }
+    if (sub == "cities") {
+        PickDialog(
+            "🌦 Ville de la météo", CITIES.map { it.name }, AppState.cityIndex, accent, null,
+            { AppState.cityIndex = it }, { sub = "settings" }
+        )
     }
 
     // ----- Photos et citations -----
@@ -991,7 +1201,7 @@ fun InfoPanel(accent: Color, modifier: Modifier) {
         horizontalAlignment = Alignment.End
     ) {
         Text(
-            SimpleDateFormat("HH:mm:ss", Locale.FRANCE).format(now),
+            SimpleDateFormat(timeFormat(), Locale.FRANCE).format(now),
             style = TextStyle(
                 color = Color.White, fontSize = 48.sp, fontWeight = FontWeight.Bold,
                 shadow = glow(accent, 28f)
@@ -1003,7 +1213,7 @@ fun InfoPanel(accent: Color, modifier: Modifier) {
         )
         Spacer(Modifier.height(8.dp))
         Text("$weather   •   $network", color = Color.White, fontSize = 20.sp)
-        if (rates.isNotEmpty()) Text(rates, color = Color.White.copy(alpha = 0.8f), fontSize = 16.sp)
+        if (rates.isNotEmpty() && !AppState.hideRates) Text(rates, color = Color.White.copy(alpha = 0.8f), fontSize = 16.sp)
     }
 }
 
@@ -1032,7 +1242,7 @@ fun ScreenSaver(accent: Color) {
         if (mode == 2) Particles(accent)
         Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                SimpleDateFormat("HH:mm:ss", Locale.FRANCE).format(now),
+                SimpleDateFormat(timeFormat(), Locale.FRANCE).format(now),
                 style = TextStyle(
                     color = Color.White, fontSize = 110.sp, fontWeight = FontWeight.Bold,
                     shadow = glow(accent, 50f)
@@ -1131,7 +1341,7 @@ fun rememberPhotos(): String? {
             if (files.isEmpty()) { current = null; delay(3000); continue }
             current = files[idx % files.size].absolutePath
             idx++
-            delay(WALLPAPER_DELAY_MS)
+            delay(WALL_DELAYS[AppState.delayIndex] * 1000L)
         }
     }
     return current
@@ -1173,7 +1383,7 @@ fun VideoBg(urls: List<String>) {
 @Composable
 fun NeonButton(
     text: String, accent: Color, modifier: Modifier = Modifier,
-    selected: Boolean = false, requester: FocusRequester? = null, onClick: () -> Unit
+    selected: Boolean = false, requester: FocusRequester? = null, dot: Color? = null, onClick: () -> Unit
 ) {
     var f by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(12.dp)
@@ -1188,7 +1398,33 @@ fun NeonButton(
             .padding(horizontal = 20.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(text, color = Color.White, fontSize = 18.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (dot != null) {
+                Box(Modifier.size(16.dp).clip(CircleShape).background(dot))
+                Spacer(Modifier.width(10.dp))
+            }
+            Text(text, color = Color.White, fontSize = 18.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+        }
+    }
+}
+
+@Composable
+fun PickDialog(
+    title: String, items: List<String>, selected: Int, accent: Color, dots: List<Color>?,
+    onPick: (Int) -> Unit, onClose: () -> Unit,
+    extra: @Composable ColumnScope.() -> Unit = {}
+) {
+    Dialog(onDismissRequest = onClose) {
+        Panel(title, accent) { first ->
+            extra()
+            items.forEachIndexed { i, name ->
+                NeonButton(
+                    name, accent, selected = i == selected,
+                    requester = if (i == selected) first else null, dot = dots?.getOrNull(i)
+                ) { onPick(i) }
+            }
+            NeonButton("◀ Retour", accent) { onClose() }
+        }
     }
 }
 
@@ -1217,26 +1453,63 @@ fun Panel(title: String, accent: Color, content: @Composable ColumnScope.(FocusR
 @Composable
 fun AppTile(
     app: AppItem, requester: FocusRequester?,
-    w: Dp = 200.dp, h: Dp = 112.dp,
+    w: Dp = 200.dp * TILE_SCALES[AppState.tileIndex], h: Dp = 112.dp * TILE_SCALES[AppState.tileIndex],
     onFocus: () -> Unit, onClick: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
+    val style = AppState.focusStyle
+    val fx = AppState.fx
+    val target = when (style) { 0 -> 1.25f; 1 -> 1.15f; else -> 1f }
     val scale by animateFloatAsState(
-        if (isFocused) 1.25f else 1f,
-        if (LITE_MODE) tween(120) else spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        if (isFocused) target else 1f,
+        if (fx == 0) tween(120) else spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
         label = "scale"
     )
+    // les voisins s'écartent quand la tuile est sélectionnée (comme sur PS5)
+    val gap by animateDpAsState(if (isFocused && style == 0) 22.dp else 0.dp, tween(if (fx == 0) 100 else 220), label = "gap")
+    // contour blanc qui pulse (effets Normal et Max)
+    val pulseA = if (isFocused && fx >= 1 && style == 0) {
+        rememberInfiniteTransition(label = "pulse").animateFloat(
+            0.55f, 1f, infiniteRepeatable(tween(700, easing = LinearEasing), RepeatMode.Reverse), label = "pa"
+        )
+    } else null
+    // reflet qui traverse la tuile (effet Max)
+    val shineA = if (isFocused && fx >= 2 && style == 0) {
+        rememberInfiniteTransition(label = "shine").animateFloat(
+            -0.3f, 1.3f, infiniteRepeatable(tween(1500, easing = LinearEasing)), label = "sh"
+        )
+    } else null
     val shape = RoundedCornerShape(16.dp)
     Image(
         bitmap = app.image,
         contentDescription = app.label,
         contentScale = ContentScale.Crop,
         modifier = Modifier
+            .padding(horizontal = gap)
             .size(w, h)
             .scale(scale)
-            .shadow(if (isFocused && !LITE_MODE) 28.dp else 0.dp, shape, ambientColor = app.accent, spotColor = app.accent)
+            .shadow(if (isFocused && fx >= 2) 28.dp else 0.dp, shape, ambientColor = app.accent, spotColor = app.accent)
             .clip(shape)
-            .border(if (isFocused) 3.dp else 0.dp, app.accent, shape)
+            .drawWithContent {
+                drawContent()
+                if (isFocused) {
+                    val p = pulseA?.value ?: 1f
+                    val col = if (style == 0) Color.White else app.accent
+                    drawRoundRect(
+                        color = col.copy(alpha = p), cornerRadius = CornerRadius(16.dp.toPx()),
+                        style = Stroke(width = 6.dp.toPx())
+                    )
+                    shineA?.let { sh ->
+                        val x = size.width * sh.value
+                        drawRect(
+                            Brush.linearGradient(
+                                listOf(Color.Transparent, Color.White.copy(alpha = 0.35f), Color.Transparent),
+                                start = Offset(x - 60f, 0f), end = Offset(x + 60f, size.height * 0.6f)
+                            )
+                        )
+                    }
+                }
+            }
             .then(if (requester != null) Modifier.focusRequester(requester) else Modifier)
             .onFocusChanged { isFocused = it.isFocused; if (it.isFocused) onFocus() }
             .clickable { onClick() }
