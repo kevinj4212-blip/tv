@@ -315,6 +315,15 @@ fun tileDims(): Pair<Dp, Dp> {
 }
 
 fun cyc(cur: Int, size: Int, d: Int): Int = ((cur + d) % size + size) % size
+
+fun bumpPin(pos: Int, d: Int) {
+    val digits = "%04d".format(AppState.pinCode).map { it - '0' }.toMutableList()
+    digits[pos] = (digits[pos] + d + 10) % 10
+    AppState.pinCode = digits.joinToString("").toInt()
+    Remote.clearSessions()
+}
+
+data class QuickItem(val icon: String, val label: String, val action: () -> Unit)
 val WALL_DELAYS = listOf(10, 5, 20, 30, 60)
 val TILE_NAMES = listOf("Moyenne", "Petite", "Grande")
 val TILE_SCALES = listOf(1f, 0.85f, 1.1f)
@@ -390,6 +399,8 @@ object AppState {
     var clockSize by mutableStateOf(0)
     var hideQuotes by mutableStateOf(false)
     var quoteDelay by mutableStateOf(0)
+    var pinCode by mutableStateOf(0)
+    var pinOff by mutableStateOf(false)
 
     private fun b(x: Boolean) = if (x) 1 else 0
 
@@ -397,14 +408,14 @@ object AppState {
         "theme", "bg", "wall", "pstyle", "dim", "sbg", "fx", "delay", "tile", "focus",
         "hue", "h12", "hidesec", "hidebarca", "hiderates", "mute", "city", "sdelay",
         "overlay", "acount", "aspeed", "shape", "gap", "zoom", "border", "labels", "hiderecents",
-        "layout", "hideweather", "hidewifi", "clock", "hidequotes", "qdelay"
+        "layout", "hideweather", "hidewifi", "clock", "hidequotes", "qdelay", "pin1", "pinoff"
     )
 
     fun all(): List<Int> = listOf(
         themeIndex, bgMode, wallIndex, particleStyle, dimIndex, saverBg, fx, delayIndex, tileIndex, focusStyle,
         hue, b(h12), b(hideSec), b(hideBarca), b(hideRates), b(mute), cityIndex, saverDelay,
         b(overlayOn), animCount, animSpeed, tileShape, tileGap, zoomIndex, borderMode, b(showLabels), b(hideRecents),
-        layoutMode, b(hideWeather), b(hideWifi), clockSize, b(hideQuotes), quoteDelay
+        layoutMode, b(hideWeather), b(hideWifi), clockSize, b(hideQuotes), quoteDelay, pinCode + 1, b(pinOff)
     )
 
     fun save(st: Store) {
@@ -446,6 +457,9 @@ object AppState {
         clockSize = st.int("clock").coerceIn(0, CLOCK_SIZES.lastIndex)
         hideQuotes = st.int("hidequotes") == 1
         quoteDelay = st.int("qdelay").coerceIn(0, QUOTE_DELAYS.lastIndex)
+        val p = st.int("pin1")
+        pinCode = if (p == 0) Random.nextInt(10000) else (p - 1).coerceIn(0, 9999)
+        pinOff = st.int("pinoff") == 1
     }
 
     fun reset(st: Store) {
@@ -796,23 +810,90 @@ object Remote {
         }
     }
 
+    private const val LOGIN = """<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{background:#111;color:#fff;font-family:sans-serif;text-align:center;padding-top:60px}input{width:60%;padding:16px;font-size:28px;text-align:center;letter-spacing:8px;border-radius:12px;border:0}button{display:block;margin:20px auto;padding:16px;width:60%;font-size:22px;border-radius:12px;background:#ff2bd6;color:#fff;border:0}p.e{color:#ff8a80}</style></head><body><h2>Ma TV</h2><p>Entre le code PIN affiché sur la télé</p><form method="POST" action="/login"><input name="pin" type="password" inputmode="numeric" maxlength="8" autofocus><button>Entrer</button></form>%MSG%</body></html>"""
+
+    private val sessions = java.util.Collections.synchronizedSet(HashSet<String>())
+    @Volatile private var fails = 0
+    @Volatile private var lockUntil = 0L
+
+    fun clearSessions() { sessions.clear() }
+
+    private fun loginPage(msg: String): String =
+        LOGIN.replace("%MSG%", if (msg.isEmpty()) "" else "<p class=\"e\">$msg</p>")
+
+    private fun send(out: java.io.OutputStream, status: String, body: String, extra: String = "") {
+        val b = body.toByteArray(Charsets.UTF_8)
+        out.write(
+            ("HTTP/1.1 $status\r\nContent-Type: text/html; charset=utf-8\r\n" +
+                "Content-Length: ${b.size}\r\nConnection: close\r\n$extra\r\n").toByteArray()
+        )
+        out.write(b)
+        out.flush()
+    }
+
     private fun handle(c: Socket) {
         try {
             c.use {
                 val input = BufferedInputStream(it.getInputStream())
                 val line = readLine(input) ?: return
                 var len = 0L
+                var cookie = ""
                 while (true) {
                     val h = readLine(input) ?: break
                     if (h.isEmpty()) break
                     if (h.startsWith("Content-Length:", ignoreCase = true)) {
                         len = h.substringAfter(":").trim().toLongOrNull() ?: 0L
                     }
+                    if (h.startsWith("Cookie:", ignoreCase = true)) cookie = h.substringAfter(":")
                 }
+                val method = line.substringBefore(" ")
                 val path = line.split(" ").getOrNull(1) ?: "/"
                 val cmd = path.substringBefore("?")
                 val arg = path.substringAfter("t=", "")
                 val out = it.getOutputStream()
+                val token = cookie.split(";").map { x -> x.trim() }.firstOrNull { x -> x.startsWith("s=") }?.substring(2) ?: ""
+                val authed = AppState.pinOff || (token.isNotEmpty() && sessions.contains(token))
+
+                // ----- connexion par code PIN -----
+                if (method == "POST" && cmd == "/login") {
+                    val buf = ByteArray(minOf(len, 256L).toInt())
+                    var got = 0
+                    while (got < buf.size) {
+                        val n = input.read(buf, got, buf.size - got)
+                        if (n < 0) break
+                        got += n
+                    }
+                    val form = String(buf, 0, got, Charsets.UTF_8)
+                    val pin = URLDecoder.decode(form.substringAfter("pin=", "").substringBefore("&"), "UTF-8")
+                    val now = System.currentTimeMillis()
+                    if (now < lockUntil) {
+                        send(out, "429 Too Many Requests", loginPage("Trop d'essais. Réessaie dans une minute."))
+                        return
+                    }
+                    if (pin == "%04d".format(AppState.pinCode)) {
+                        fails = 0
+                        val t = java.util.UUID.randomUUID().toString().replace("-", "")
+                        if (sessions.size > 20) sessions.clear()
+                        sessions.add(t)
+                        out.write(
+                            ("HTTP/1.1 303 See Other\r\nLocation: /\r\n" +
+                                "Set-Cookie: s=$t; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000\r\n" +
+                                "Content-Length: 0\r\nConnection: close\r\n\r\n").toByteArray()
+                        )
+                        out.flush()
+                    } else {
+                        fails++
+                        if (fails >= 5) { lockUntil = now + 60_000L; fails = 0 }
+                        send(out, "401 Unauthorized", loginPage("Code incorrect."))
+                    }
+                    return
+                }
+
+                // ----- tout le reste demande le PIN -----
+                if (!authed) {
+                    send(out, if (cmd == "/upload") "401 Unauthorized" else "200 OK", loginPage(""))
+                    return
+                }
 
                 if (cmd == "/upload") {
                     val dir = photoDir
@@ -854,15 +935,10 @@ object Remote {
                 }
                 if (redirect) {
                     out.write("HTTP/1.1 303 See Other\r\nLocation: /\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
+                    out.flush()
                 } else {
-                    val body = PAGE.toByteArray(Charsets.UTF_8)
-                    out.write(
-                        ("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n" +
-                            "Content-Length: ${body.size}\r\nConnection: close\r\n\r\n").toByteArray()
-                    )
-                    out.write(body)
+                    send(out, "200 OK", PAGE)
                 }
-                out.flush()
             }
         } catch (ignored: Exception) {}
     }
@@ -1136,25 +1212,33 @@ fun HomeScreen() {
         if (AppState.saver) ScreenSaver(accent)
     }
 
-    // ----- Menu rapide -----
+    // ----- Menu rapide (grille de cartes) -----
     if (AppState.menuOpen) {
         Dialog(onDismissRequest = { AppState.menuOpen = false }) {
-            Panel("Menu rapide", accent) { first ->
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    NeonButton("🔉 Vol −", accent, Modifier.weight(1f), requester = first) {
+            Panel("⚡ Menu rapide", accent, width = 540.dp) { first ->
+                val items = listOf(
+                    QuickItem("🔉", "Volume −") {
                         audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
-                    }
-                    NeonButton("🔊 Vol +", accent, Modifier.weight(1f)) {
+                    },
+                    QuickItem("🔊", "Volume +") {
                         audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
+                    },
+                    QuickItem("🔇", "Muet") {
+                        audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_TOGGLE_MUTE, AudioManager.FLAG_SHOW_UI)
+                    },
+                    QuickItem("✨", "Studio") { AppState.menuOpen = false; AppState.studioOpen = true },
+                    QuickItem("📷", "Photos et citations") { AppState.menuOpen = false; sub = "photos" },
+                    QuickItem("📶", "Wi-Fi") { ctx.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) },
+                    QuickItem("⚙", "Paramètres de la télé") { ctx.startActivity(Intent(Settings.ACTION_SETTINGS)) },
+                    QuickItem("🌙", "Écran de veille") { AppState.menuOpen = false; AppState.saver = true },
+                    QuickItem("👁", "Réafficher les applis") { hidden = emptyList(); store.save("hidden", hidden) },
+                )
+                items.chunked(3).forEachIndexed { r, rowItems ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        rowItems.forEachIndexed { c, q ->
+                            MenuCard(q.icon, q.label, accent, Modifier.weight(1f), if (r == 0 && c == 0) first else null) { q.action() }
+                        }
                     }
-                }
-                NeonButton("✨ Studio de personnalisation", accent) { AppState.menuOpen = false; AppState.studioOpen = true }
-                NeonButton("📷 Photos et citations", accent) { AppState.menuOpen = false; sub = "photos" }
-                NeonButton("📶 Wi-Fi", accent) { ctx.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) }
-                NeonButton("⚙ Paramètres de la télé", accent) { ctx.startActivity(Intent(Settings.ACTION_SETTINGS)) }
-                NeonButton("🌙 Écran de veille", accent) { AppState.menuOpen = false; AppState.saver = true }
-                NeonButton("👁 Réafficher les applis masquées", accent) {
-                    hidden = emptyList(); store.save("hidden", hidden)
                 }
             }
         }
@@ -1185,6 +1269,10 @@ fun HomeScreen() {
                 Text("Sur ton téléphone (même Wi-Fi), ouvre :", color = Color.White, fontSize = 16.sp)
                 Text("http://${localIp()}:$REMOTE_PORT", color = accent, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Text("Tu y envoies tes photos et tes citations.", color = Color.White, fontSize = 16.sp)
+                Text(
+                    if (AppState.pinOff) "Page sans code PIN" else "Code PIN : " + "%04d".format(AppState.pinCode),
+                    color = accent, fontSize = 20.sp, fontWeight = FontWeight.Bold
+                )
                 Text("Photos : $count   •   Citations perso : $nq", color = Color.White, fontSize = 18.sp)
                 NeonButton("🗑 Supprimer mes photos", accent, requester = first) {
                     photoFiles().forEach { it.delete() }; AppState.photoTick++
@@ -1566,7 +1654,7 @@ fun PickDialog(
 }
 
 @Composable
-fun Panel(title: String, accent: Color, content: @Composable ColumnScope.(FocusRequester) -> Unit) {
+fun Panel(title: String, accent: Color, width: Dp = 400.dp, content: @Composable ColumnScope.(FocusRequester) -> Unit) {
     val first = remember { FocusRequester() }
     LaunchedEffect(Unit) { delay(150); try { first.requestFocus() } catch (ignored: Exception) {} }
     val view = LocalView.current
@@ -1577,7 +1665,7 @@ fun Panel(title: String, accent: Color, content: @Composable ColumnScope.(FocusR
             .background(Color(0xF00A0A18))
             .border(2.dp, accent, RoundedCornerShape(20.dp))
             .padding(28.dp)
-            .width(400.dp)
+            .width(width)
             .heightIn(max = 620.dp)
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -1719,8 +1807,8 @@ fun OptionRow(
 fun PreviewPanel(accent: Color, theme: Theme, modifier: Modifier) {
     val shape = tileShape(AppState.tileShape)
     val sq = AppState.tileShape == 4 || AppState.tileShape == 5
-    val w = if (sq) 78.dp else 112.dp
-    val h = if (sq) 78.dp else 63.dp
+    val w = if (sq) 64.dp else 96.dp
+    val h = if (sq) 64.dp else 54.dp
     val zoom = ZOOMS[AppState.zoomIndex]
     val gap = (GAP_DP[AppState.tileGap] / 2.5f).dp
     val borderCol = when (AppState.borderMode) { 1 -> theme.second; 2 -> theme.color ?: accent; else -> Color.White }
@@ -1733,11 +1821,15 @@ fun PreviewPanel(accent: Color, theme: Theme, modifier: Modifier) {
     ) {
         Text("Aperçu en direct", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(10.dp))
-        Box(Modifier.fillMaxWidth().height(130.dp).clip(RoundedCornerShape(14.dp)).background(Color.Black.copy(alpha = 0.5f))) {
+        Box(Modifier.fillMaxWidth().height(90.dp).clip(RoundedCornerShape(14.dp)).background(Color.Black.copy(alpha = 0.5f))) {
             Particles(accent, theme.second)
         }
-        Spacer(Modifier.height(24.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.CenterVertically) {
+        Spacer(Modifier.height(16.dp))
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             listOf("▶", "🎮", "🎵").forEachIndexed { i, e ->
                 val sel = i == 1
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1754,7 +1846,7 @@ fun PreviewPanel(accent: Color, theme: Theme, modifier: Modifier) {
                 }
             }
         }
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(16.dp))
         Text("Thème : ${theme.name}", color = Color.White.copy(alpha = 0.9f), fontSize = 15.sp)
         Text("Tuiles : ${SHAPES[AppState.tileShape]} • ${LAYOUT_NAMES[AppState.layoutMode]}", color = Color.White.copy(alpha = 0.9f), fontSize = 15.sp)
         Text("Animation : ${PARTICLE_STYLES[AppState.particleStyle]}", color = Color.White.copy(alpha = 0.9f), fontSize = 15.sp)
@@ -1892,6 +1984,14 @@ fun Studio(
                                 AppState.fx = cyc(AppState.fx, FX_NAMES.size, d)
                             }
                             OptionRow("Sons", onOff(!AppState.mute), accent) { AppState.mute = !AppState.mute }
+                            OptionRow("Page web protégée par PIN", onOff(!AppState.pinOff), accent) { AppState.pinOff = !AppState.pinOff }
+                            OptionRow("PIN : chiffre 1", "%04d".format(AppState.pinCode).substring(0, 1), accent) { d -> bumpPin(0, d) }
+                            OptionRow("PIN : chiffre 2", "%04d".format(AppState.pinCode).substring(1, 2), accent) { d -> bumpPin(1, d) }
+                            OptionRow("PIN : chiffre 3", "%04d".format(AppState.pinCode).substring(2, 3), accent) { d -> bumpPin(2, d) }
+                            OptionRow("PIN : chiffre 4", "%04d".format(AppState.pinCode).substring(3, 4), accent) { d -> bumpPin(3, d) }
+                            NeonButton("🔑 PIN au hasard (actuel : ${"%04d".format(AppState.pinCode)})", accent, Modifier.fillMaxWidth()) {
+                                AppState.pinCode = Random.nextInt(10000); Remote.clearSessions()
+                            }
                             NeonButton("👁 Réafficher les applis masquées", accent, Modifier.fillMaxWidth()) { onUnhide() }
                             NeonButton("♻ Réinitialiser tous les réglages", accent, Modifier.fillMaxWidth()) { onReset() }
                         }
@@ -1904,5 +2004,30 @@ fun Studio(
                 color = Color.White.copy(alpha = 0.6f), fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp)
             )
         }
+    }
+}
+
+@Composable
+fun MenuCard(icon: String, label: String, accent: Color, modifier: Modifier, requester: FocusRequester?, onClick: () -> Unit) {
+    var f by remember { mutableStateOf(false) }
+    val sc by animateFloatAsState(if (f) 1.06f else 1f, tween(100), label = "mc")
+    val shape = RoundedCornerShape(18.dp)
+    Column(
+        modifier
+            .height(104.dp)
+            .scale(sc)
+            .then(if (requester != null) Modifier.focusRequester(requester) else Modifier)
+            .onFocusChanged { f = it.isFocused }
+            .clip(shape)
+            .background(if (f) accent.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.07f))
+            .border(if (f) 2.dp else 1.dp, if (f) accent else Color.White.copy(alpha = 0.18f), shape)
+            .clickable { onClick() }
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(icon, fontSize = 30.sp)
+        Spacer(Modifier.height(6.dp))
+        Text(label, color = Color.White, fontSize = 14.sp, textAlign = TextAlign.Center, maxLines = 2)
     }
 }
