@@ -41,6 +41,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -48,10 +49,15 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
+import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.CutCornerShape
+import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -67,17 +73,23 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
@@ -88,12 +100,14 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.graphics.drawable.toBitmap
 import coil.compose.AsyncImage
@@ -122,6 +136,7 @@ import java.util.Locale
 import java.util.TimeZone
 import kotlin.concurrent.thread
 import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -173,11 +188,14 @@ val THEMES = listOf(
     Theme("Émeraude", Color(0xFF00E676), Color(0xFF1DE9B6), Color(0xFF01100A)),
     Theme("Personnalisé", Color(0xFFFFFFFF), Color(0xFFFFFFFF), Color(0xFF000000)),
 )
-val BG_MODES = listOf("Images", "Vidéo", "Particules", "Mes photos")
-val PARTICLE_STYLES = listOf("Étoiles", "Pluie néon", "Neige", "Bulles", "Lucioles", "Matrix")
+val BG_MODES = listOf("Images", "Vidéo", "Animation", "Mes photos")
+val PARTICLE_STYLES = listOf(
+    "Étoiles", "Étoiles filantes", "Pluie néon", "Neige", "Bulles", "Lucioles",
+    "Matrix", "Aurore boréale", "Grille synthwave", "Vagues néon", "Tunnel d'étoiles", "Pétales"
+)
 val DIM_LEVELS = listOf(0.08f, 0.25f, 0.45f)
 val DIM_NAMES = listOf("Lumineux", "Normal", "Sombre")
-val SAVER_BGS = listOf("Mes photos", "Animés", "Particules")
+val SAVER_BGS = listOf("Mes photos", "Animés", "Animation")
 
 val QUOTES = listOf(
     "Chaque jour est une nouvelle chance de devenir plus fort.",
@@ -258,6 +276,45 @@ val CITIES = listOf(
 )
 
 val FX_NAMES = listOf("Léger", "Normal", "Max")
+val ANIM_COUNT_NAMES = listOf("Moyenne", "Faible", "Forte")
+val ANIM_COUNTS = listOf(30, 12, 60)
+val ANIM_SPEED_NAMES = listOf("Normale", "Lente", "Rapide")
+val ANIM_SPEEDS = listOf(30000, 60000, 15000)
+val SHAPES = listOf("Arrondie", "Carrée", "Très arrondie", "Pilule", "Cercle", "Hexagone", "Coins coupés")
+val GAP_NAMES = listOf("Normal", "Serré", "Large")
+val GAP_DP = listOf(28, 14, 46)
+val ZOOM_NAMES = listOf("Normal", "Léger", "Fort")
+val ZOOMS = listOf(1.25f, 1.12f, 1.4f)
+val BORDER_NAMES = listOf("Blanc", "Couleur de l'appli", "Couleur du thème")
+val LAYOUT_NAMES = listOf("Rangée", "Double rangée")
+val CLOCK_NAMES = listOf("Moyenne", "Petite", "Grande")
+val CLOCK_SIZES = listOf(48, 36, 64)
+val QUOTE_DELAYS = listOf(12, 6, 20, 30)
+
+val HexShape = GenericShape { size, _ ->
+    val w = size.width
+    val h = size.height
+    moveTo(w * 0.25f, 0f); lineTo(w * 0.75f, 0f); lineTo(w, h * 0.5f)
+    lineTo(w * 0.75f, h); lineTo(w * 0.25f, h); lineTo(0f, h * 0.5f); close()
+}
+
+fun tileShape(i: Int): Shape = when (i) {
+    1 -> RoundedCornerShape(4.dp)
+    2 -> RoundedCornerShape(30.dp)
+    3 -> RoundedCornerShape(50)
+    4 -> CircleShape
+    5 -> HexShape
+    6 -> CutCornerShape(14.dp)
+    else -> RoundedCornerShape(16.dp)
+}
+
+fun tileDims(): Pair<Dp, Dp> {
+    val ts = TILE_SCALES[AppState.tileIndex]
+    return if (AppState.tileShape == 4 || AppState.tileShape == 5) Pair(130.dp * ts, 130.dp * ts)
+    else Pair(200.dp * ts, 112.dp * ts)
+}
+
+fun cyc(cur: Int, size: Int, d: Int): Int = ((cur + d) % size + size) % size
 val WALL_DELAYS = listOf(10, 5, 20, 30, 60)
 val TILE_NAMES = listOf("Moyenne", "Petite", "Grande")
 val TILE_SCALES = listOf(1f, 0.85f, 1.1f)
@@ -298,6 +355,7 @@ object AppState {
     var wallpaperSkip by mutableStateOf(0)
     var banner by mutableStateOf<String?>(null)
     var menuOpen by mutableStateOf(false)
+    var studioOpen by mutableStateOf(false)
     var saver by mutableStateOf(false)
     var resumeTick by mutableStateOf(0)
     var wallIndex by mutableStateOf(0)
@@ -317,16 +375,36 @@ object AppState {
     var mute by mutableStateOf(false)
     var cityIndex by mutableStateOf(0)
     var saverDelay by mutableStateOf(0)
+    var overlayOn by mutableStateOf(false)
+    var animCount by mutableStateOf(0)
+    var animSpeed by mutableStateOf(0)
+    var tileShape by mutableStateOf(0)
+    var tileGap by mutableStateOf(0)
+    var zoomIndex by mutableStateOf(0)
+    var borderMode by mutableStateOf(0)
+    var showLabels by mutableStateOf(false)
+    var hideRecents by mutableStateOf(false)
+    var layoutMode by mutableStateOf(0)
+    var hideWeather by mutableStateOf(false)
+    var hideWifi by mutableStateOf(false)
+    var clockSize by mutableStateOf(0)
+    var hideQuotes by mutableStateOf(false)
+    var quoteDelay by mutableStateOf(0)
 
     private fun b(x: Boolean) = if (x) 1 else 0
+
     private val keys = listOf(
         "theme", "bg", "wall", "pstyle", "dim", "sbg", "fx", "delay", "tile", "focus",
-        "hue", "h12", "hidesec", "hidebarca", "hiderates", "mute", "city", "sdelay"
+        "hue", "h12", "hidesec", "hidebarca", "hiderates", "mute", "city", "sdelay",
+        "overlay", "acount", "aspeed", "shape", "gap", "zoom", "border", "labels", "hiderecents",
+        "layout", "hideweather", "hidewifi", "clock", "hidequotes", "qdelay"
     )
 
     fun all(): List<Int> = listOf(
         themeIndex, bgMode, wallIndex, particleStyle, dimIndex, saverBg, fx, delayIndex, tileIndex, focusStyle,
-        hue, b(h12), b(hideSec), b(hideBarca), b(hideRates), b(mute), cityIndex, saverDelay
+        hue, b(h12), b(hideSec), b(hideBarca), b(hideRates), b(mute), cityIndex, saverDelay,
+        b(overlayOn), animCount, animSpeed, tileShape, tileGap, zoomIndex, borderMode, b(showLabels), b(hideRecents),
+        layoutMode, b(hideWeather), b(hideWifi), clockSize, b(hideQuotes), quoteDelay
     )
 
     fun save(st: Store) {
@@ -353,6 +431,27 @@ object AppState {
         mute = st.int("mute") == 1
         cityIndex = st.int("city").coerceIn(0, CITIES.lastIndex)
         saverDelay = st.int("sdelay").coerceIn(0, SAVER_MINUTES.lastIndex)
+        overlayOn = st.int("overlay") == 1
+        animCount = st.int("acount").coerceIn(0, ANIM_COUNTS.lastIndex)
+        animSpeed = st.int("aspeed").coerceIn(0, ANIM_SPEEDS.lastIndex)
+        tileShape = st.int("shape").coerceIn(0, SHAPES.lastIndex)
+        tileGap = st.int("gap").coerceIn(0, GAP_DP.lastIndex)
+        zoomIndex = st.int("zoom").coerceIn(0, ZOOMS.lastIndex)
+        borderMode = st.int("border").coerceIn(0, BORDER_NAMES.lastIndex)
+        showLabels = st.int("labels") == 1
+        hideRecents = st.int("hiderecents") == 1
+        layoutMode = st.int("layout").coerceIn(0, LAYOUT_NAMES.lastIndex)
+        hideWeather = st.int("hideweather") == 1
+        hideWifi = st.int("hidewifi") == 1
+        clockSize = st.int("clock").coerceIn(0, CLOCK_SIZES.lastIndex)
+        hideQuotes = st.int("hidequotes") == 1
+        quoteDelay = st.int("qdelay").coerceIn(0, QUOTE_DELAYS.lastIndex)
+    }
+
+    fun reset(st: Store) {
+        keys.forEach { st.putInt(it, 0) }
+        load(st)
+        wallpaperSkip++
     }
 }
 
@@ -856,6 +955,7 @@ fun HomeScreen() {
 
     val theme = resolveTheme(AppState.themeIndex)
     val ts = TILE_SCALES[AppState.tileIndex]
+    val (tw, th) = tileDims()
     val accent by animateColorAsState(
         theme.color ?: focusedApp?.accent ?: NEON_DEFAULT, if (LITE_MODE) snap() else tween(600), label = "accent"
     )
@@ -920,7 +1020,7 @@ fun HomeScreen() {
             }
         )
         }
-        if (AppState.bgMode == 2) Particles(accent)
+        if (AppState.bgMode == 2 || AppState.overlayOn) Particles(accent, theme.second)
 
         InfoPanel(accent, Modifier.align(Alignment.TopEnd).padding(40.dp))
         if (!AppState.hideBarca) BarcaCard(accent, Modifier.align(Alignment.TopCenter).padding(top = 110.dp))
@@ -960,23 +1060,45 @@ fun HomeScreen() {
                     NeonButton(name, accent, selected = tab == i) { tab = i }
                 }
             }
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 80.dp, vertical = 30.dp),
-                horizontalArrangement = Arrangement.spacedBy(28.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                item {
-                    NeonButton("⚡ Menu", accent, Modifier.size(120.dp * ts, 112.dp * ts)) { AppState.menuOpen = true }
-                }
-                itemsIndexed(apps, key = { _, a -> a.pkg }) { index, app ->
+            val gapDp = GAP_DP[AppState.tileGap].dp
+            val tileItem: @Composable (AppItem, Int) -> Unit = { app, index ->
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     AppTile(
                         app, if (index == 0) firstTile else null,
                         onFocus = { focusedApp = app; if (soundOn && !AppState.mute) sounds.move() },
                         onClick = { launch(app) }
                     )
+                    if (AppState.showLabels) {
+                        Text(
+                            app.label, color = Color.White.copy(alpha = 0.9f), fontSize = 14.sp, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+                            modifier = Modifier.width(tw).padding(top = 6.dp)
+                        )
+                    }
                 }
             }
-            if (recentApps.isNotEmpty()) {
+            if (AppState.layoutMode == 0) {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 80.dp, vertical = 30.dp),
+                    horizontalArrangement = Arrangement.spacedBy(gapDp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    item { NeonButton("⚡ Menu", accent, Modifier.size(120.dp * ts, th)) { AppState.menuOpen = true } }
+                    itemsIndexed(apps, key = { _, a -> a.pkg }) { index, app -> tileItem(app, index) }
+                }
+            } else {
+                LazyHorizontalGrid(
+                    rows = GridCells.Fixed(2),
+                    modifier = Modifier.height(th * 2 + gapDp / 2 + 60.dp + (if (AppState.showLabels) 52.dp else 0.dp)),
+                    contentPadding = PaddingValues(horizontal = 80.dp, vertical = 30.dp),
+                    horizontalArrangement = Arrangement.spacedBy(gapDp),
+                    verticalArrangement = Arrangement.spacedBy(gapDp / 2)
+                ) {
+                    item { NeonButton("⚡ Menu", accent, Modifier.size(120.dp * ts, th)) { AppState.menuOpen = true } }
+                    gridItemsIndexed(apps, key = { _, a -> a.pkg }) { index, app -> tileItem(app, index) }
+                }
+            }
+            if (AppState.layoutMode == 0 && !AppState.hideRecents && recentApps.isNotEmpty()) {
                 Text("Récents", color = Color.White.copy(alpha = 0.8f), fontSize = 18.sp,
                     modifier = Modifier.padding(start = 80.dp, bottom = 6.dp))
                 LazyRow(
@@ -985,7 +1107,7 @@ fun HomeScreen() {
                 ) {
                     itemsIndexed(recentApps, key = { _, a -> "r" + a.pkg }) { _, app ->
                         AppTile(
-                            app, null, 140.dp * ts, 79.dp * ts,
+                            app, null, tw * 0.7f, th * 0.7f,
                             onFocus = { focusedApp = app; if (soundOn && !AppState.mute) sounds.move() },
                             onClick = { launch(app) }
                         )
@@ -1026,8 +1148,7 @@ fun HomeScreen() {
                         audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
                     }
                 }
-                NeonButton("🎨 Apparence", accent) { AppState.menuOpen = false; sub = "look" }
-                NeonButton("⚙ Réglages", accent) { AppState.menuOpen = false; sub = "settings" }
+                NeonButton("✨ Studio de personnalisation", accent) { AppState.menuOpen = false; AppState.studioOpen = true }
                 NeonButton("📷 Photos et citations", accent) { AppState.menuOpen = false; sub = "photos" }
                 NeonButton("📶 Wi-Fi", accent) { ctx.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) }
                 NeonButton("⚙ Paramètres de la télé", accent) { ctx.startActivity(Intent(Settings.ACTION_SETTINGS)) }
@@ -1039,87 +1160,20 @@ fun HomeScreen() {
         }
     }
 
-    // ----- Apparence -----
-    if (sub == "look") {
-        Dialog(onDismissRequest = { sub = "" }) {
-            Panel("🎨 Apparence", accent) { first ->
-                NeonButton("🎨 Couleurs : ${theme.name}", accent, requester = first, dot = accent) { sub = "colors" }
-                NeonButton("🖼 Fond : ${BG_MODES[AppState.bgMode]}", accent) {
-                    AppState.bgMode = (AppState.bgMode + 1) % BG_MODES.size
-                }
-                NeonButton("🎌 Univers d'images : ${WALL_THEMES[AppState.wallIndex].name}", accent) { sub = "walls" }
-                NeonButton("✨ Particules : ${PARTICLE_STYLES[AppState.particleStyle]}", accent) {
-                    AppState.particleStyle = (AppState.particleStyle + 1) % PARTICLE_STYLES.size
-                }
-                NeonButton("☀ Luminosité : ${DIM_NAMES[AppState.dimIndex]}", accent) {
-                    AppState.dimIndex = (AppState.dimIndex + 1) % DIM_LEVELS.size
-                }
-                NeonButton("💤 Fond de veille : ${SAVER_BGS[AppState.saverBg]}", accent) {
-                    AppState.saverBg = (AppState.saverBg + 1) % SAVER_BGS.size
-                }
-                NeonButton("🌙 Voir l'écran de veille", accent) { sub = ""; AppState.saver = true }
-                NeonButton("⏭ Image suivante", accent) { AppState.wallpaperSkip++ }
-                NeonButton("Fermer", accent) { sub = "" }
-            }
-        }
-    }
-
-    // ----- Réglages -----
-    if (sub == "settings") {
-        Dialog(onDismissRequest = { sub = "" }) {
-            Panel("⚙ Réglages", accent) { first ->
-                NeonButton("⚡ Effets : ${FX_NAMES[AppState.fx]}", accent, requester = first) {
-                    AppState.fx = (AppState.fx + 1) % FX_NAMES.size
-                }
-                NeonButton("🎬 Animation de sélection : ${FOCUS_STYLES[AppState.focusStyle]}", accent) {
-                    AppState.focusStyle = (AppState.focusStyle + 1) % FOCUS_STYLES.size
-                }
-                NeonButton("🔲 Taille des tuiles : ${TILE_NAMES[AppState.tileIndex]}", accent) {
-                    AppState.tileIndex = (AppState.tileIndex + 1) % TILE_SCALES.size
-                }
-                NeonButton("⏱ Changement de fond : ${WALL_DELAYS[AppState.delayIndex]} s", accent) {
-                    AppState.delayIndex = (AppState.delayIndex + 1) % WALL_DELAYS.size
-                }
-                NeonButton("🕒 Format de l'heure : ${if (AppState.h12) "12 h" else "24 h"}", accent) { AppState.h12 = !AppState.h12 }
-                NeonButton("⏲ Afficher les secondes : ${onOff(!AppState.hideSec)}", accent) { AppState.hideSec = !AppState.hideSec }
-                NeonButton("⚽ Carte Barça : ${onOff(!AppState.hideBarca)}", accent) { AppState.hideBarca = !AppState.hideBarca }
-                NeonButton("💱 Taux de change : ${onOff(!AppState.hideRates)}", accent) { AppState.hideRates = !AppState.hideRates }
-                NeonButton("🌦 Ville de la météo : ${CITIES[AppState.cityIndex].name}", accent) { sub = "cities" }
-                NeonButton("🔊 Sons : ${onOff(!AppState.mute)}", accent) { AppState.mute = !AppState.mute }
-                NeonButton("💤 Veille après : ${saverLabel(AppState.saverDelay)}", accent) {
-                    AppState.saverDelay = (AppState.saverDelay + 1) % SAVER_MINUTES.size
-                }
-                NeonButton("Fermer", accent) { sub = "" }
-            }
-        }
-    }
-
-    // ----- Choix : couleurs, univers d'images, villes -----
-    if (sub == "colors") {
-        PickDialog(
-            "🎨 Couleurs", THEMES.map { it.name }, AppState.themeIndex, accent,
-            THEMES.indices.map { resolveTheme(it).color ?: NEON_DEFAULT },
-            { AppState.themeIndex = it }, { sub = "look" }
+    // ----- Studio de personnalisation -----
+    if (AppState.studioOpen) {
+        Dialog(
+            onDismissRequest = { AppState.studioOpen = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
-            if (theme.name == CUSTOM_NAME) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    NeonButton("◀ Teinte", accent, Modifier.weight(1f), dot = accent) { AppState.hue = (AppState.hue + 345) % 360 }
-                    NeonButton("Teinte ▶", accent, Modifier.weight(1f), dot = accent) { AppState.hue = (AppState.hue + 15) % 360 }
-                }
-            }
+            Studio(
+                accent, theme,
+                onClose = { AppState.studioOpen = false },
+                onPhotos = { AppState.studioOpen = false; sub = "photos" },
+                onUnhide = { hidden = emptyList(); store.save("hidden", hidden) },
+                onReset = { AppState.reset(store) }
+            )
         }
-    }
-    if (sub == "walls") {
-        PickDialog(
-            "🎌 Univers d'images", WALL_THEMES.map { it.name }, AppState.wallIndex, accent, null,
-            { AppState.wallIndex = it }, { sub = "look" }
-        )
-    }
-    if (sub == "cities") {
-        PickDialog(
-            "🌦 Ville de la météo", CITIES.map { it.name }, AppState.cityIndex, accent, null,
-            { AppState.cityIndex = it }, { sub = "settings" }
-        )
     }
 
     // ----- Photos et citations -----
@@ -1203,7 +1257,7 @@ fun InfoPanel(accent: Color, modifier: Modifier) {
         Text(
             SimpleDateFormat(timeFormat(), Locale.FRANCE).format(now),
             style = TextStyle(
-                color = Color.White, fontSize = 48.sp, fontWeight = FontWeight.Bold,
+                color = Color.White, fontSize = CLOCK_SIZES[AppState.clockSize].sp, fontWeight = FontWeight.Bold,
                 shadow = glow(accent, 28f)
             )
         )
@@ -1212,7 +1266,8 @@ fun InfoPanel(accent: Color, modifier: Modifier) {
             color = Color.White.copy(alpha = 0.8f), fontSize = 18.sp
         )
         Spacer(Modifier.height(8.dp))
-        Text("$weather   •   $network", color = Color.White, fontSize = 20.sp)
+        val net = if (AppState.hideWifi) network.substringBefore(" :") else network
+        Text(if (AppState.hideWeather) net else "$weather   •   $net", color = Color.White, fontSize = 20.sp)
         if (rates.isNotEmpty() && !AppState.hideRates) Text(rates, color = Color.White.copy(alpha = 0.8f), fontSize = 16.sp)
     }
 }
@@ -1228,7 +1283,7 @@ fun ScreenSaver(accent: Color) {
     }
     val quotes = remember(AppState.photoTick) { allQuotes() }
     var qi by remember { mutableStateOf(Random.nextInt(1000)) }
-    LaunchedEffect(Unit) { while (true) { delay(12_000); qi++ } }
+    LaunchedEffect(Unit) { while (true) { delay(QUOTE_DELAYS[AppState.quoteDelay] * 1000L); qi++ } }
     val quote = quotes[qi % quotes.size]
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -1253,7 +1308,7 @@ fun ScreenSaver(accent: Color) {
                 color = Color.White.copy(alpha = 0.85f), fontSize = 28.sp
             )
             Spacer(Modifier.height(30.dp))
-            Crossfade(targetState = quote, animationSpec = tween(if (LITE_MODE) 400 else 1200), label = "quote") { q ->
+            if (!AppState.hideQuotes) Crossfade(targetState = quote, animationSpec = tween(if (LITE_MODE) 400 else 1200), label = "quote") { q ->
                 Text(
                     "« " + q + " »",
                     modifier = Modifier.widthIn(max = 900.dp).padding(horizontal = 48.dp),
@@ -1268,57 +1323,139 @@ fun ScreenSaver(accent: Color) {
 }
 
 @Composable
-fun Particles(color: Color, count: Int = if (LITE_MODE) 20 else 60) {
-    val style = AppState.particleStyle
+fun Particles(color: Color, second: Color = color, style: Int = AppState.particleStyle) {
+    val dur = ANIM_SPEEDS[AppState.animSpeed]
+    val base = ANIM_COUNTS[AppState.animCount]
+    val count = if (LITE_MODE) minOf(base, 24) else base
     val t by rememberInfiniteTransition(label = "p").animateFloat(
         initialValue = 0f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(30000, easing = LinearEasing)), label = "t"
+        animationSpec = infiniteRepeatable(tween(dur, easing = LinearEasing)), label = "t"
     )
-    val seeds = remember {
+    val seeds = remember(count) {
         List(count) {
             floatArrayOf(Random.nextFloat(), Random.nextFloat(), Random.nextInt(1, 4).toFloat(), 1f + Random.nextFloat() * 3f)
         }
     }
-    Canvas(Modifier.fillMaxSize()) {
-        val w = size.width
-        val h = size.height
-        seeds.forEach { s ->
-            val k = s[2]
-            val sz = s[3]
-            when (style) {
-                1 -> { // pluie néon
-                    val y = (s[1] + t * k) % 1f
-                    drawLine(color.copy(alpha = 0.55f), Offset(s[0] * w, y * h), Offset(s[0] * w, y * h + 14f * sz), strokeWidth = 2.5f)
-                }
-                2 -> { // neige
-                    val y = (s[1] + t) % 1f
-                    val x = s[0] + 0.03f * sin((t * 2f * k + s[0]) * 6.2832f)
-                    drawCircle(Color.White.copy(alpha = 0.7f), sz * 2.2f, Offset(x * w, y * h))
-                }
-                3 -> { // bulles
-                    val y = ((s[1] - t) % 1f + 1f) % 1f
-                    val x = s[0] + 0.02f * sin((t * 2f * k + s[0]) * 6.2832f)
-                    drawCircle(color.copy(alpha = 0.6f), sz * 7f, Offset(x * w, y * h), style = Stroke(width = 2.5f))
-                }
-                4 -> { // lucioles
-                    val x = 0.5f + 0.45f * sin((t * k + s[0]) * 6.2832f)
-                    val y = 0.5f + 0.4f * sin((t * (k + 1f) + s[1]) * 6.2832f)
-                    val a = 0.25f + 0.5f * (0.5f + 0.5f * sin((t * 3f * k + s[0]) * 6.2832f))
-                    drawCircle(color.copy(alpha = a), sz * 3.5f, Offset(x * w, y * h))
-                }
-                5 -> { // matrix
-                    val col = (s[0] * 40f).toInt() / 40f
-                    val y = (s[1] + t * k) % 1f
-                    for (j in 0..3) {
-                        drawCircle(color.copy(alpha = 0.7f - j * 0.17f), 3f, Offset(col * w, ((y - j * 0.025f + 1f) % 1f) * h))
+    Canvas(Modifier.fillMaxSize()) { drawAnim(style, t, color, second, seeds) }
+}
+
+fun DrawScope.drawAnim(style: Int, t: Float, c: Color, c2: Color, seeds: List<FloatArray>) {
+    val w = size.width
+    val h = size.height
+    val tau = 6.2832f
+    when (style) {
+        1 -> { // étoiles filantes
+            seeds.forEachIndexed { idx, s ->
+                if (idx % 3 == 0) {
+                    val p = (t * s[2] * 3f + s[1]) % 1f
+                    if (p < 0.3f) {
+                        val q = p / 0.3f
+                        val hx = (s[0] * 0.7f + q * 0.35f) * w
+                        val hy = (s[1] * 0.4f + q * 0.4f) * h
+                        val tl = 140f * (0.6f + s[3] / 4f)
+                        val fade = sin(q * 3.1416f)
+                        drawLine(c.copy(alpha = 0.8f * fade), Offset(hx - tl * 0.85f, hy - tl * 0.5f), Offset(hx, hy), 3f)
+                        drawCircle(Color.White.copy(alpha = fade), 4f, Offset(hx, hy))
                     }
-                }
-                else -> { // étoiles
-                    val y = ((s[1] - t * k) % 1f + 1f) % 1f
-                    val x = s[0] + 0.02f * sin((t * 3f * k + s[0]) * 6.2832f)
-                    drawCircle(color.copy(alpha = 0.25f + 0.05f * sz), sz * 2.5f, Offset(x * w, y * h))
+                } else {
+                    val tw = 0.3f + 0.5f * (0.5f + 0.5f * sin((t * 3f * s[2] + s[0]) * tau))
+                    drawCircle(Color.White.copy(alpha = tw * 0.6f), s[3] * 0.9f, Offset(s[0] * w, s[1] * h))
                 }
             }
+        }
+        2 -> seeds.forEach { s -> // pluie néon
+            val y = (s[1] + t * s[2]) % 1f
+            drawLine(c.copy(alpha = 0.55f), Offset(s[0] * w, y * h), Offset(s[0] * w, y * h + 14f * s[3]), 2.5f)
+        }
+        3 -> seeds.forEach { s -> // neige
+            val y = (s[1] + t) % 1f
+            val x = s[0] + 0.03f * sin((t * 2f * s[2] + s[0]) * tau)
+            drawCircle(Color.White.copy(alpha = 0.7f), s[3] * 2.2f, Offset(x * w, y * h))
+        }
+        4 -> seeds.forEach { s -> // bulles
+            val y = ((s[1] - t) % 1f + 1f) % 1f
+            val x = s[0] + 0.02f * sin((t * 2f * s[2] + s[0]) * tau)
+            drawCircle(c.copy(alpha = 0.6f), s[3] * 7f, Offset(x * w, y * h), style = Stroke(width = 2.5f))
+        }
+        5 -> seeds.forEach { s -> // lucioles
+            val x = 0.5f + 0.45f * sin((t * s[2] + s[0]) * tau)
+            val y = 0.5f + 0.4f * sin((t * (s[2] + 1f) + s[1]) * tau)
+            val a = 0.25f + 0.5f * (0.5f + 0.5f * sin((t * 3f * s[2] + s[0]) * tau))
+            drawCircle(c.copy(alpha = a), s[3] * 3.5f, Offset(x * w, y * h))
+        }
+        6 -> seeds.forEach { s -> // matrix
+            val col = (s[0] * 40f).toInt() / 40f
+            val y = (s[1] + t * s[2]) % 1f
+            for (j in 0..3) {
+                drawCircle(c.copy(alpha = 0.7f - j * 0.17f), 3f, Offset(col * w, ((y - j * 0.025f + 1f) % 1f) * h))
+            }
+        }
+        7 -> { // aurore boréale
+            val cols = listOf(c, c2, c.copy(alpha = 0.8f))
+            for (b in 0..2) {
+                val path = Path()
+                val baseY = h * (0.22f + 0.13f * b)
+                val steps = 24
+                for (i in 0..steps) {
+                    val x = w * i / steps
+                    val y = baseY + h * 0.07f * sin(i / steps.toFloat() * (2f + b) * tau + t * tau * (b + 1))
+                    if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                }
+                drawPath(path, cols[b].copy(alpha = 0.22f), style = Stroke(width = h * 0.14f))
+            }
+        }
+        8 -> { // grille synthwave
+            val horizon = h * 0.6f
+            drawCircle(c2.copy(alpha = 0.25f), h * 0.16f, Offset(w / 2f, horizon - h * 0.04f))
+            drawLine(c2.copy(alpha = 0.8f), Offset(0f, horizon), Offset(w, horizon), 3f)
+            for (i in 0 until 10) {
+                val z = ((i / 10f) + t * 5f) % 1f
+                val y = horizon + (h - horizon) * z * z
+                drawLine(c.copy(alpha = 0.15f + 0.6f * z), Offset(0f, y), Offset(w, y), 1.5f + 2f * z)
+            }
+            for (j in -8..8) {
+                drawLine(c.copy(alpha = 0.35f), Offset(w / 2f + j * w * 0.012f, horizon), Offset(w / 2f + j * w * 0.14f, h), 1.5f)
+            }
+        }
+        9 -> { // vagues néon
+            for (b in 0..2) {
+                val path = Path()
+                val steps = 40
+                val baseY = h * (0.55f + 0.12f * b)
+                for (i in 0..steps) {
+                    val x = w * i / steps
+                    val y = baseY + h * 0.05f * sin(i / steps.toFloat() * (3f + b) * tau + t * tau * (b + 1))
+                    if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                }
+                drawPath(path, (if (b == 1) c2 else c).copy(alpha = 0.7f), style = Stroke(width = 4f))
+            }
+        }
+        10 -> { // tunnel d'étoiles
+            val cx = w / 2f
+            val cy = h / 2f
+            val maxR = maxOf(w, h) * 0.6f
+            seeds.forEach { s ->
+                val ang = s[0] * tau
+                val p = (s[1] + t * s[2] * 2f) % 1f
+                val r = p * p * maxR
+                val r0 = r * 0.82f
+                val dx = cos(ang)
+                val dy = sin(ang)
+                drawLine(c.copy(alpha = 0.15f + 0.7f * p), Offset(cx + dx * r0, cy + dy * r0), Offset(cx + dx * r, cy + dy * r), 1f + 3f * p)
+            }
+        }
+        11 -> seeds.forEach { s -> // pétales
+            val y = (s[1] + t) % 1f
+            val x = s[0] + 0.05f * sin((t * 2f * s[2] + s[0]) * tau)
+            val deg = t * 360f * s[2] + s[0] * 360f
+            rotate(deg, Offset(x * w, y * h)) {
+                drawOval(Color(0xFFFF9EC4).copy(alpha = 0.8f), Offset(x * w - s[3] * 3f, y * h - s[3] * 1.8f), Size(s[3] * 6f, s[3] * 3.6f))
+            }
+        }
+        else -> seeds.forEach { s -> // étoiles
+            val y = ((s[1] - t * s[2]) % 1f + 1f) % 1f
+            val x = s[0] + 0.02f * sin((t * 3f * s[2] + s[0]) * tau)
+            drawCircle(c.copy(alpha = 0.25f + 0.05f * s[3]), s[3] * 2.5f, Offset(x * w, y * h))
         }
     }
 }
@@ -1392,8 +1529,8 @@ fun NeonButton(
             .then(if (requester != null) Modifier.focusRequester(requester) else Modifier)
             .onFocusChanged { f = it.isFocused }
             .clip(shape)
-            .background(if (f) accent.copy(alpha = 0.35f) else Color.White.copy(alpha = if (selected) 0.2f else 0.08f))
-            .border(if (f) 2.dp else 0.dp, accent, shape)
+            .background(if (f) accent.copy(alpha = 0.4f) else if (selected) accent.copy(alpha = 0.22f) else Color.Black.copy(alpha = 0.5f))
+            .border(if (f) 2.dp else 1.dp, if (f) accent else accent.copy(alpha = 0.35f), shape)
             .clickable { onClick() }
             .padding(horizontal = 20.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center
@@ -1453,33 +1590,34 @@ fun Panel(title: String, accent: Color, content: @Composable ColumnScope.(FocusR
 @Composable
 fun AppTile(
     app: AppItem, requester: FocusRequester?,
-    w: Dp = 200.dp * TILE_SCALES[AppState.tileIndex], h: Dp = 112.dp * TILE_SCALES[AppState.tileIndex],
+    w: Dp = tileDims().first, h: Dp = tileDims().second,
     onFocus: () -> Unit, onClick: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val style = AppState.focusStyle
     val fx = AppState.fx
-    val target = when (style) { 0 -> 1.25f; 1 -> 1.15f; else -> 1f }
+    val zoom = ZOOMS[AppState.zoomIndex]
+    val target = when (style) { 0 -> zoom; 1 -> 1f + (zoom - 1f) * 0.6f; else -> 1f }
     val scale by animateFloatAsState(
         if (isFocused) target else 1f,
         if (fx == 0) tween(120) else spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
         label = "scale"
     )
-    // les voisins s'écartent quand la tuile est sélectionnée (comme sur PS5)
     val gap by animateDpAsState(if (isFocused && style == 0) 22.dp else 0.dp, tween(if (fx == 0) 100 else 220), label = "gap")
-    // contour blanc qui pulse (effets Normal et Max)
     val pulseA = if (isFocused && fx >= 1 && style == 0) {
         rememberInfiniteTransition(label = "pulse").animateFloat(
             0.55f, 1f, infiniteRepeatable(tween(700, easing = LinearEasing), RepeatMode.Reverse), label = "pa"
         )
     } else null
-    // reflet qui traverse la tuile (effet Max)
     val shineA = if (isFocused && fx >= 2 && style == 0) {
         rememberInfiniteTransition(label = "shine").animateFloat(
             -0.3f, 1.3f, infiniteRepeatable(tween(1500, easing = LinearEasing)), label = "sh"
         )
     } else null
-    val shape = RoundedCornerShape(16.dp)
+    val shape = tileShape(AppState.tileShape)
+    val themeCol = resolveTheme(AppState.themeIndex).color ?: app.accent
+    val borderCol = when (AppState.borderMode) { 1 -> app.accent; 2 -> themeCol; else -> Color.White }
+    val pulse = pulseA?.value ?: 1f
     Image(
         bitmap = app.image,
         contentDescription = app.label,
@@ -1493,12 +1631,6 @@ fun AppTile(
             .drawWithContent {
                 drawContent()
                 if (isFocused) {
-                    val p = pulseA?.value ?: 1f
-                    val col = if (style == 0) Color.White else app.accent
-                    drawRoundRect(
-                        color = col.copy(alpha = p), cornerRadius = CornerRadius(16.dp.toPx()),
-                        style = Stroke(width = 6.dp.toPx())
-                    )
                     shineA?.let { sh ->
                         val x = size.width * sh.value
                         drawRect(
@@ -1510,8 +1642,267 @@ fun AppTile(
                     }
                 }
             }
+            .then(
+                if (isFocused) Modifier.border(BorderStroke(if (style == 2) 3.dp else 5.dp, borderCol.copy(alpha = pulse)), shape)
+                else Modifier
+            )
             .then(if (requester != null) Modifier.focusRequester(requester) else Modifier)
             .onFocusChanged { isFocused = it.isFocused; if (it.isFocused) onFocus() }
             .clickable { onClick() }
     )
+}
+
+// =====================================================================
+//  STUDIO DE PERSONNALISATION
+// =====================================================================
+@Composable
+fun TabButton(text: String, selected: Boolean, accent: Color, requester: FocusRequester?, onFocus: () -> Unit) {
+    var f by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(14.dp)
+    Box(
+        Modifier
+            .then(if (requester != null) Modifier.focusRequester(requester) else Modifier)
+            .onFocusChanged { f = it.isFocused; if (it.isFocused) onFocus() }
+            .clip(shape)
+            .background(if (f) accent.copy(alpha = 0.4f) else if (selected) accent.copy(alpha = 0.22f) else Color.Black.copy(alpha = 0.4f))
+            .border(if (f) 2.dp else 1.dp, if (f || selected) accent else Color.White.copy(alpha = 0.15f), shape)
+            .clickable { onFocus() }
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text, color = Color.White, fontSize = 16.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+    }
+}
+
+@Composable
+fun OptionRow(
+    label: String, value: String, accent: Color, dot: Color? = null,
+    requester: FocusRequester? = null, onChange: (Int) -> Unit
+) {
+    var f by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(14.dp)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .then(if (requester != null) Modifier.focusRequester(requester) else Modifier)
+            .onFocusChanged { f = it.isFocused }
+            .onKeyEvent { e ->
+                if (e.type == KeyEventType.KeyDown) {
+                    when (e.key) {
+                        Key.DirectionLeft -> { onChange(-1); true }
+                        Key.DirectionRight -> { onChange(1); true }
+                        else -> false
+                    }
+                } else false
+            }
+            .clip(shape)
+            .background(if (f) accent.copy(alpha = 0.28f) else Color.Black.copy(alpha = 0.4f))
+            .border(if (f) 2.dp else 1.dp, if (f) accent else Color.White.copy(alpha = 0.12f), shape)
+            .clickable { onChange(1) }
+            .padding(horizontal = 18.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, Modifier.weight(1f), color = Color.White, fontSize = 18.sp)
+        Text("◀", color = if (f) accent else Color.White.copy(alpha = 0.25f), fontSize = 18.sp)
+        Spacer(Modifier.width(10.dp))
+        if (dot != null) {
+            Box(Modifier.size(16.dp).clip(CircleShape).background(dot))
+            Spacer(Modifier.width(8.dp))
+        }
+        Text(value, modifier = Modifier.widthIn(min = 150.dp), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+        Spacer(Modifier.width(10.dp))
+        Text("▶", color = if (f) accent else Color.White.copy(alpha = 0.25f), fontSize = 18.sp)
+    }
+}
+
+@Composable
+fun PreviewPanel(accent: Color, theme: Theme, modifier: Modifier) {
+    val shape = tileShape(AppState.tileShape)
+    val sq = AppState.tileShape == 4 || AppState.tileShape == 5
+    val w = if (sq) 78.dp else 112.dp
+    val h = if (sq) 78.dp else 63.dp
+    val zoom = ZOOMS[AppState.zoomIndex]
+    val gap = (GAP_DP[AppState.tileGap] / 2.5f).dp
+    val borderCol = when (AppState.borderMode) { 1 -> theme.second; 2 -> theme.color ?: accent; else -> Color.White }
+    Column(
+        modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(Brush.linearGradient(listOf(theme.base, accent.copy(alpha = 0.35f), theme.second.copy(alpha = 0.3f))))
+            .border(2.dp, accent.copy(alpha = 0.7f), RoundedCornerShape(20.dp))
+            .padding(18.dp)
+    ) {
+        Text("Aperçu en direct", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(10.dp))
+        Box(Modifier.fillMaxWidth().height(130.dp).clip(RoundedCornerShape(14.dp)).background(Color.Black.copy(alpha = 0.5f))) {
+            Particles(accent, theme.second)
+        }
+        Spacer(Modifier.height(24.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.CenterVertically) {
+            listOf("▶", "🎮", "🎵").forEachIndexed { i, e ->
+                val sel = i == 1
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        Modifier
+                            .size(w, h)
+                            .scale(if (sel) zoom else 1f)
+                            .clip(shape)
+                            .background(accent.copy(alpha = if (sel) 0.85f else 0.45f))
+                            .then(if (sel) Modifier.border(4.dp, borderCol, shape) else Modifier),
+                        contentAlignment = Alignment.Center
+                    ) { Text(e, fontSize = 26.sp) }
+                    if (AppState.showLabels) Text("Appli", color = Color.White, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                }
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+        Text("Thème : ${theme.name}", color = Color.White.copy(alpha = 0.9f), fontSize = 15.sp)
+        Text("Tuiles : ${SHAPES[AppState.tileShape]} • ${LAYOUT_NAMES[AppState.layoutMode]}", color = Color.White.copy(alpha = 0.9f), fontSize = 15.sp)
+        Text("Animation : ${PARTICLE_STYLES[AppState.particleStyle]}", color = Color.White.copy(alpha = 0.9f), fontSize = 15.sp)
+    }
+}
+
+@Composable
+fun Studio(
+    accent: Color, theme: Theme,
+    onClose: () -> Unit, onPhotos: () -> Unit, onUnhide: () -> Unit, onReset: () -> Unit
+) {
+    var tab by remember { mutableStateOf(0) }
+    val tabs = listOf("🎨 Couleurs", "🖼 Fond", "✨ Animations", "📱 Applis", "🕒 Infos", "🌙 Veille", "⚡ Système")
+    val first = remember { FocusRequester() }
+    LaunchedEffect(Unit) { delay(200); try { first.requestFocus() } catch (ignored: Exception) {} }
+    val view = LocalView.current
+    SideEffect { (view.parent as? DialogWindowProvider)?.window?.setDimAmount(0f) }
+
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xF2070510), Color(0xEB0B0820))))) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 24.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "✦ Studio de personnalisation", Modifier.weight(1f),
+                    style = TextStyle(color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold, shadow = glow(accent, 30f))
+                )
+                NeonButton("✕ Fermer", accent) { onClose() }
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                tabs.forEachIndexed { i, t -> TabButton(t, tab == i, accent, if (i == 0) first else null) { tab = i } }
+            }
+            Row(
+                Modifier.weight(1f).fillMaxWidth().padding(top = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(24.dp)
+            ) {
+                Column(
+                    Modifier.weight(1.5f).fillMaxHeight().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    when (tab) {
+                        0 -> {
+                            OptionRow("Thème de couleurs", theme.name, accent, dot = accent) { d ->
+                                AppState.themeIndex = cyc(AppState.themeIndex, THEMES.size, d)
+                            }
+                            if (theme.name == CUSTOM_NAME) {
+                                OptionRow("Teinte (couleur au choix)", "${AppState.hue}°", accent, dot = accent) { d ->
+                                    AppState.hue = (AppState.hue + d * 15 + 360) % 360
+                                }
+                            }
+                            OptionRow("Luminosité du fond", DIM_NAMES[AppState.dimIndex], accent) { d ->
+                                AppState.dimIndex = cyc(AppState.dimIndex, DIM_LEVELS.size, d)
+                            }
+                            OptionRow("Couleur du contour des tuiles", BORDER_NAMES[AppState.borderMode], accent) { d ->
+                                AppState.borderMode = cyc(AppState.borderMode, BORDER_NAMES.size, d)
+                            }
+                        }
+                        1 -> {
+                            OptionRow("Type de fond", BG_MODES[AppState.bgMode], accent) { d ->
+                                AppState.bgMode = cyc(AppState.bgMode, BG_MODES.size, d)
+                            }
+                            OptionRow("Univers d'images", WALL_THEMES[AppState.wallIndex].name, accent) { d ->
+                                AppState.wallIndex = cyc(AppState.wallIndex, WALL_THEMES.size, d)
+                            }
+                            OptionRow("Changement d'image", "${WALL_DELAYS[AppState.delayIndex]} s", accent) { d ->
+                                AppState.delayIndex = cyc(AppState.delayIndex, WALL_DELAYS.size, d)
+                            }
+                            NeonButton("⏭ Image suivante", accent, Modifier.fillMaxWidth()) { AppState.wallpaperSkip++ }
+                        }
+                        2 -> {
+                            OptionRow("Style d'animation", PARTICLE_STYLES[AppState.particleStyle], accent) { d ->
+                                AppState.particleStyle = cyc(AppState.particleStyle, PARTICLE_STYLES.size, d)
+                            }
+                            OptionRow("Animation par-dessus le fond", onOff(AppState.overlayOn), accent) { AppState.overlayOn = !AppState.overlayOn }
+                            OptionRow("Quantité", ANIM_COUNT_NAMES[AppState.animCount], accent) { d ->
+                                AppState.animCount = cyc(AppState.animCount, ANIM_COUNTS.size, d)
+                            }
+                            OptionRow("Vitesse", ANIM_SPEED_NAMES[AppState.animSpeed], accent) { d ->
+                                AppState.animSpeed = cyc(AppState.animSpeed, ANIM_SPEEDS.size, d)
+                            }
+                        }
+                        3 -> {
+                            OptionRow("Disposition", LAYOUT_NAMES[AppState.layoutMode], accent) { d ->
+                                AppState.layoutMode = cyc(AppState.layoutMode, LAYOUT_NAMES.size, d)
+                            }
+                            OptionRow("Forme des tuiles", SHAPES[AppState.tileShape], accent) { d ->
+                                AppState.tileShape = cyc(AppState.tileShape, SHAPES.size, d)
+                            }
+                            OptionRow("Taille des tuiles", TILE_NAMES[AppState.tileIndex], accent) { d ->
+                                AppState.tileIndex = cyc(AppState.tileIndex, TILE_SCALES.size, d)
+                            }
+                            OptionRow("Espacement", GAP_NAMES[AppState.tileGap], accent) { d ->
+                                AppState.tileGap = cyc(AppState.tileGap, GAP_DP.size, d)
+                            }
+                            OptionRow("Animation de sélection", FOCUS_STYLES[AppState.focusStyle], accent) { d ->
+                                AppState.focusStyle = cyc(AppState.focusStyle, FOCUS_STYLES.size, d)
+                            }
+                            OptionRow("Zoom de sélection", ZOOM_NAMES[AppState.zoomIndex], accent) { d ->
+                                AppState.zoomIndex = cyc(AppState.zoomIndex, ZOOMS.size, d)
+                            }
+                            OptionRow("Noms sous les tuiles", onOff(AppState.showLabels), accent) { AppState.showLabels = !AppState.showLabels }
+                            OptionRow("Afficher les récents", onOff(!AppState.hideRecents), accent) { AppState.hideRecents = !AppState.hideRecents }
+                        }
+                        4 -> {
+                            OptionRow("Format de l'heure", if (AppState.h12) "12 h" else "24 h", accent) { AppState.h12 = !AppState.h12 }
+                            OptionRow("Afficher les secondes", onOff(!AppState.hideSec), accent) { AppState.hideSec = !AppState.hideSec }
+                            OptionRow("Taille de l'horloge", CLOCK_NAMES[AppState.clockSize], accent) { d ->
+                                AppState.clockSize = cyc(AppState.clockSize, CLOCK_SIZES.size, d)
+                            }
+                            OptionRow("Météo", onOff(!AppState.hideWeather), accent) { AppState.hideWeather = !AppState.hideWeather }
+                            OptionRow("Ville de la météo", CITIES[AppState.cityIndex].name, accent) { d ->
+                                AppState.cityIndex = cyc(AppState.cityIndex, CITIES.size, d)
+                            }
+                            OptionRow("Nom du Wi-Fi", onOff(!AppState.hideWifi), accent) { AppState.hideWifi = !AppState.hideWifi }
+                            OptionRow("Carte du Barça", onOff(!AppState.hideBarca), accent) { AppState.hideBarca = !AppState.hideBarca }
+                            OptionRow("Taux de change", onOff(!AppState.hideRates), accent) { AppState.hideRates = !AppState.hideRates }
+                        }
+                        5 -> {
+                            OptionRow("Veille après", saverLabel(AppState.saverDelay), accent) { d ->
+                                AppState.saverDelay = cyc(AppState.saverDelay, SAVER_MINUTES.size, d)
+                            }
+                            OptionRow("Fond de la veille", SAVER_BGS[AppState.saverBg], accent) { d ->
+                                AppState.saverBg = cyc(AppState.saverBg, SAVER_BGS.size, d)
+                            }
+                            OptionRow("Citations", onOff(!AppState.hideQuotes), accent) { AppState.hideQuotes = !AppState.hideQuotes }
+                            OptionRow("Changement de citation", "${QUOTE_DELAYS[AppState.quoteDelay]} s", accent) { d ->
+                                AppState.quoteDelay = cyc(AppState.quoteDelay, QUOTE_DELAYS.size, d)
+                            }
+                            NeonButton("🌙 Voir l'écran de veille maintenant", accent, Modifier.fillMaxWidth()) {
+                                onClose(); AppState.saver = true
+                            }
+                            NeonButton("📷 Mes photos et mes citations", accent, Modifier.fillMaxWidth()) { onPhotos() }
+                        }
+                        else -> {
+                            OptionRow("Effets (performance)", FX_NAMES[AppState.fx], accent) { d ->
+                                AppState.fx = cyc(AppState.fx, FX_NAMES.size, d)
+                            }
+                            OptionRow("Sons", onOff(!AppState.mute), accent) { AppState.mute = !AppState.mute }
+                            NeonButton("👁 Réafficher les applis masquées", accent, Modifier.fillMaxWidth()) { onUnhide() }
+                            NeonButton("♻ Réinitialiser tous les réglages", accent, Modifier.fillMaxWidth()) { onReset() }
+                        }
+                    }
+                }
+                PreviewPanel(accent, theme, Modifier.weight(1f).fillMaxHeight())
+            }
+            Text(
+                "◀ ▶ changer la valeur   •   OK : suivant   •   Retour : fermer",
+                color = Color.White.copy(alpha = 0.6f), fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp)
+            )
+        }
+    }
 }
