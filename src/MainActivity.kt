@@ -9,9 +9,12 @@ import android.app.role.RoleManager
 import android.content.pm.ApplicationInfo
 import android.os.Build
 import android.graphics.Bitmap
+import android.graphics.drawable.Drawable
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
+import android.media.tv.TvContract
+import android.media.tv.TvInputManager
 import android.media.AudioTrack
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -82,6 +85,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
@@ -279,6 +283,8 @@ val FX_NAMES = listOf("Léger", "Normal", "Max")
 val ANIM_COUNT_NAMES = listOf("Moyenne", "Faible", "Forte")
 val ANIM_COUNTS = listOf(30, 12, 60)
 val ANIM_SPEED_NAMES = listOf("Normale", "Lente", "Rapide")
+val AMBIENT_VOLS = listOf(0.25f, 0.5f, 0.85f)
+val AMBIENT_NAMES = listOf("Faible", "Moyen", "Fort")
 val ANIM_SPEEDS = listOf(30000, 60000, 15000)
 val SHAPES = listOf("Arrondie", "Carrée", "Très arrondie", "Pilule", "Cercle", "Hexagone", "Coins coupés")
 val GAP_NAMES = listOf("Normal", "Serré", "Large")
@@ -330,7 +336,7 @@ val TILE_SCALES = listOf(1f, 0.85f, 1.1f)
 val FOCUS_STYLES = listOf("PS5", "Simple", "Aucune")
 val SAVER_MINUTES = listOf(3, 1, 5, 10, 0)
 const val CUSTOM_NAME = "Personnalisé"
-val TABS = listOf("Tout", "Favoris", "Jeux", "Vidéo", "Musique")
+val TABS = listOf("Tout", "Favoris", "Jeux", "Vidéo", "Musique", "Entrées")
 
 fun glow(c: Color, r: Float): Shadow? = if (LITE_MODE) null else Shadow(c, blurRadius = r)
 
@@ -401,6 +407,9 @@ object AppState {
     var quoteDelay by mutableStateOf(0)
     var pinCode by mutableStateOf(0)
     var pinOff by mutableStateOf(false)
+    var fg by mutableStateOf(true)
+    var ambientOff by mutableStateOf(false)
+    var ambientVol by mutableStateOf(0)
 
     private fun b(x: Boolean) = if (x) 1 else 0
 
@@ -408,14 +417,14 @@ object AppState {
         "theme", "bg", "wall", "pstyle", "dim", "sbg", "fx", "delay", "tile", "focus",
         "hue", "h12", "hidesec", "hidebarca", "hiderates", "mute", "city", "sdelay",
         "overlay", "acount", "aspeed", "shape", "gap", "zoom", "border", "labels", "hiderecents",
-        "layout", "hideweather", "hidewifi", "clock", "hidequotes", "qdelay", "pin1", "pinoff"
+        "layout", "hideweather", "hidewifi", "clock", "hidequotes", "qdelay", "pin1", "pinoff", "ambientoff", "avol"
     )
 
     fun all(): List<Int> = listOf(
         themeIndex, bgMode, wallIndex, particleStyle, dimIndex, saverBg, fx, delayIndex, tileIndex, focusStyle,
         hue, b(h12), b(hideSec), b(hideBarca), b(hideRates), b(mute), cityIndex, saverDelay,
         b(overlayOn), animCount, animSpeed, tileShape, tileGap, zoomIndex, borderMode, b(showLabels), b(hideRecents),
-        layoutMode, b(hideWeather), b(hideWifi), clockSize, b(hideQuotes), quoteDelay, pinCode + 1, b(pinOff)
+        layoutMode, b(hideWeather), b(hideWifi), clockSize, b(hideQuotes), quoteDelay, pinCode + 1, b(pinOff), b(ambientOff), ambientVol
     )
 
     fun save(st: Store) {
@@ -460,6 +469,8 @@ object AppState {
         val p = st.int("pin1")
         pinCode = if (p == 0) Random.nextInt(10000) else (p - 1).coerceIn(0, 9999)
         pinOff = st.int("pinoff") == 1
+        ambientOff = st.int("ambientoff") == 1
+        ambientVol = st.int("avol").coerceIn(0, AMBIENT_VOLS.lastIndex)
     }
 
     fun reset(st: Store) {
@@ -481,7 +492,8 @@ class Store(ctx: Context) {
 //  APPLIS
 // =====================================================================
 data class AppItem(
-    val label: String, val pkg: String, val image: ImageBitmap, val accent: Color, val cat: Int
+    val label: String, val pkg: String, val image: ImageBitmap, val accent: Color, val cat: Int,
+    val inputId: String? = null
 )
 
 fun accentFrom(bmp: Bitmap): Color {
@@ -494,15 +506,61 @@ fun accentFrom(bmp: Bitmap): Color {
     return Color(android.graphics.Color.HSVToColor(hsv))
 }
 
+// Carte 16:9 pour les applis sans bannière (Chrome, etc.) : icône centrée sur un fond teinté
+fun iconCard(d: Drawable): Bitmap {
+    val icon = d.toBitmap(128, 128)
+    val base = accentFrom(icon)
+    val hsv = FloatArray(3)
+    android.graphics.Color.colorToHSV(base.toArgb(), hsv)
+    hsv[1] = minOf(hsv[1], 0.6f)
+    hsv[2] = 0.30f
+    val bmp = Bitmap.createBitmap(320, 180, Bitmap.Config.ARGB_8888)
+    val c = android.graphics.Canvas(bmp)
+    c.drawColor(android.graphics.Color.HSVToColor(hsv))
+    c.drawBitmap(icon, 96f, 26f, null)
+    return bmp
+}
+
+fun inputCard(label: String): Bitmap {
+    val bmp = Bitmap.createBitmap(320, 180, Bitmap.Config.ARGB_8888)
+    val c = android.graphics.Canvas(bmp)
+    val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    p.shader = android.graphics.LinearGradient(
+        0f, 0f, 320f, 180f, 0xFF16213E.toInt(), 0xFF0F3460.toInt(), android.graphics.Shader.TileMode.CLAMP
+    )
+    c.drawRect(0f, 0f, 320f, 180f, p)
+    p.shader = null
+    p.color = android.graphics.Color.WHITE
+    p.textAlign = android.graphics.Paint.Align.CENTER
+    p.typeface = android.graphics.Typeface.DEFAULT_BOLD
+    p.textSize = if (label.length > 8) 34f else 46f
+    c.drawText(label, 160f, 100f, p)
+    p.textSize = 22f
+    p.color = 0xFF9FB4D8.toInt()
+    c.drawText("ENTRÉE TV", 160f, 140f, p)
+    return bmp
+}
+
+// Entrées de la télé (HDMI, AV...)
+fun loadInputs(ctx: Context): List<AppItem> = try {
+    val tm = ctx.getSystemService(Context.TV_INPUT_SERVICE) as TvInputManager
+    tm.tvInputList.filter { it.isPassthroughInput }.map { info ->
+        val label = (info.loadCustomLabel(ctx) ?: info.loadLabel(ctx)).toString()
+        AppItem(label, "tvinput:" + info.id, inputCard(label).asImageBitmap(), NEON_DEFAULT, -1, info.id)
+    }
+} catch (e: Exception) { emptyList() }
+
+// Toutes les applis : mode télé + applis classiques (Chrome...)
 fun loadApps(ctx: Context): List<AppItem> {
     val pm = ctx.packageManager
-    val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
-    return pm.queryIntentActivities(intent, 0)
+    val tv = pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER), 0)
+    val normal = pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
+    return (tv + normal)
         .filter { it.activityInfo.packageName != ctx.packageName }
         .distinctBy { it.activityInfo.packageName }
         .map { ri ->
-            val drawable = ri.activityInfo.loadBanner(pm) ?: ri.loadIcon(pm)
-            val bmp = drawable.toBitmap(320, 180)
+            val banner = ri.activityInfo.loadBanner(pm)
+            val bmp = if (banner != null) banner.toBitmap(320, 180) else iconCard(ri.loadIcon(pm))
             AppItem(
                 ri.loadLabel(pm).toString(), ri.activityInfo.packageName,
                 bmp.asImageBitmap(), accentFrom(bmp), ri.activityInfo.applicationInfo.category
@@ -557,6 +615,203 @@ class Sounds {
     fun select() = play(selectT)
     fun boot() = play(bootT)
     fun release() { moveT.release(); selectT.release(); bootT.release() }
+}
+
+// =====================================================================
+//  SONS D'AMBIANCE (un par animation, générés par l'appli)
+// =====================================================================
+object AmbientSynth {
+    private const val RATE = 22050
+    private const val SECONDS = 6
+    private const val TAU = 6.283185307179586
+
+    private fun pent(r: Random): Double = listOf(523.25, 587.33, 659.25, 783.99, 880.0, 1046.5)[r.nextInt(6)]
+
+    // souffle / pluie / vagues : bruit filtré, normalisé puis ajouté
+    private fun bed(x: FloatArray, r: Random, lp: Float, hp: Float, level: Float, period: Double = 0.0, depth: Float = 0f) {
+        val b = FloatArray(x.size) { r.nextFloat() * 2f - 1f }
+        if (hp > 0f) { var y = 0f; for (i in b.indices) { y += hp * (b[i] - y); b[i] = b[i] - y } }
+        if (lp > 0f) { var y = 0f; for (i in b.indices) { y += lp * (b[i] - y); b[i] = y } }
+        var peak = 0f
+        for (v in b) peak = maxOf(peak, kotlin.math.abs(v))
+        if (peak > 0f) for (i in b.indices) b[i] = b[i] / peak * level
+        if (period > 0.0) {
+            for (i in b.indices) b[i] *= (1f - depth) + depth * (0.5f + 0.5f * sin(TAU * i / (RATE * period)).toFloat())
+        }
+        for (i in x.indices) x[i] += b[i]
+    }
+
+    private fun pad(x: FloatArray, freqs: List<Int>, level: Float) {
+        for (f in freqs) for (i in x.indices) x[i] += sin(TAU * f * i / RATE).toFloat() * level
+    }
+
+    private fun modulate(x: FloatArray, period: Double, depth: Float) {
+        for (i in x.indices) x[i] *= (1f - depth) + depth * (0.5f + 0.5f * sin(TAU * i / (RATE * period)).toFloat())
+    }
+
+    private fun tone(x: FloatArray, start: Int, freq: Double, len: Int, level: Float, decay: Float, over: Double = 0.0) {
+        for (i in 0 until len) {
+            val idx = start + i
+            if (idx >= x.size) break
+            val t = i / RATE.toDouble()
+            val env = exp(-decay * t).toFloat() * minOf(1f, i / 150f)
+            var v = sin(TAU * freq * t)
+            if (over > 0.0) v += 0.35 * sin(TAU * freq * over * t)
+            x[idx] += (v * env * level).toFloat()
+        }
+    }
+
+    private fun bell(x: FloatArray, start: Int, freq: Double, level: Float, decay: Float) =
+        tone(x, start, freq, (RATE * 2.2).toInt(), level, decay, 2.76)
+
+    private fun chirp(x: FloatArray, start: Int, f0: Double, f1: Double, len: Int, level: Float) {
+        val dur = len / RATE.toDouble()
+        for (i in 0 until len) {
+            val idx = start + i
+            if (idx >= x.size) break
+            val t = i / RATE.toDouble()
+            val phase = TAU * (f0 * t + (f1 - f0) * t * t / (2 * dur))
+            x[idx] += (sin(phase) * sin(PI * i / len) * level).toFloat()
+        }
+    }
+
+    private fun blip(x: FloatArray, start: Int, freq: Double, len: Int, level: Float) {
+        for (i in 0 until len) {
+            val idx = start + i
+            if (idx >= x.size) break
+            val sq = if (sin(TAU * freq * i / RATE) >= 0.0) 1f else -1f
+            x[idx] += sq * (1f - i / len.toFloat()) * level
+        }
+    }
+
+    private fun whoosh(x: FloatArray, start: Int, level: Float, r: Random) {
+        val len = (RATE * 1.2).toInt()
+        var y = 0f
+        for (i in 0 until len) {
+            val idx = start + i
+            if (idx >= x.size) break
+            val a = 0.05f + 0.5f * (i / len.toFloat())
+            y += a * ((r.nextFloat() * 2f - 1f) - y)
+            x[idx] += y * sin(PI * i / len).toFloat() * level * 2f
+        }
+    }
+
+    fun make(style: Int): ShortArray {
+        val n = RATE * SECONDS
+        val f = 4000
+        val r = Random(style * 7919 + 13)
+        val x = FloatArray(n + f)
+        when (style) {
+            0 -> { // étoiles : carillons dans la nuit
+                pad(x, listOf(220, 330), 0.04f)
+                repeat(8) { bell(x, r.nextInt(n - 8000), pent(r), 0.30f, 1.8f) }
+            }
+            1 -> { // étoiles filantes : souffles
+                pad(x, listOf(196, 294), 0.03f)
+                repeat(3) { whoosh(x, r.nextInt(n - 30000), 0.5f, r) }
+                repeat(5) { bell(x, r.nextInt(n - 8000), pent(r) * 2, 0.12f, 3f) }
+            }
+            2 -> { // pluie
+                bed(x, r, 0.6f, 0.12f, 0.6f)
+                repeat(30) { tone(x, r.nextInt(n - 3000), 1200.0 + r.nextInt(1800), 1500, 0.06f, 30f) }
+            }
+            3 -> { // neige : vent doux
+                bed(x, r, 0.03f, 0f, 0.6f, 3.0, 0.5f)
+                repeat(2) { bell(x, r.nextInt(n - 8000), pent(r), 0.12f, 2f) }
+            }
+            4 -> { // bulles
+                repeat(14) { chirp(x, r.nextInt(n - 4000), 500.0 + r.nextInt(300), 1400.0 + r.nextInt(600), 2600, 0.35f) }
+                pad(x, listOf(110), 0.02f)
+            }
+            5 -> { // lucioles
+                pad(x, listOf(262, 392), 0.035f)
+                repeat(10) { tone(x, r.nextInt(n - 12000), 1318.5 + r.nextInt(500), 11000, 0.22f, 6f) }
+            }
+            6 -> { // matrix
+                pad(x, listOf(55, 110), 0.05f)
+                repeat(40) { blip(x, r.nextInt(n - 2000), 400.0 + r.nextInt(1200), 900, 0.12f) }
+            }
+            7 -> { // aurore : nappe lente
+                pad(x, listOf(220, 277, 330, 440), 0.03f)
+                modulate(x, 6.0, 0.35f)
+            }
+            8 -> { // grille synthwave : basse
+                val notes = listOf(55, 82, 110, 82, 73, 98, 130, 98)
+                val step = n / 16
+                for (k in 0 until 16) tone(x, k * step, notes[k % 8].toDouble(), step, 0.45f, 3.5f, 2.0)
+                pad(x, listOf(220), 0.02f)
+            }
+            9 -> { // vagues
+                bed(x, r, 0.05f, 0f, 0.8f, 3.0, 0.85f)
+                bed(x, r, 0.4f, 0.1f, 0.25f, 3.0, 0.85f)
+            }
+            10 -> { // tunnel : grondement
+                pad(x, listOf(60, 90), 0.08f)
+                bed(x, r, 0.02f, 0f, 0.5f)
+                modulate(x, 6.0, 0.5f)
+            }
+            11 -> { // pétales : vent + carillons
+                bed(x, r, 0.04f, 0f, 0.3f, 3.0, 0.5f)
+                repeat(6) { bell(x, r.nextInt(n - 8000), 1046.5 + r.nextInt(700), 0.18f, 1.5f) }
+            }
+            else -> pad(x, listOf(220), 0.05f)
+        }
+        // raccord sans clic : la fin se fond dans le début
+        val out = FloatArray(n)
+        for (i in 0 until n) out[i] = x[i]
+        for (i in 0 until f) {
+            val w = i / f.toFloat()
+            out[i] = x[i] * w + x[n + i] * (1f - w)
+        }
+        var peak = 0f
+        for (v in out) peak = maxOf(peak, kotlin.math.abs(v))
+        val g = if (peak > 0f) 0.7f * 32767f / peak else 1f
+        return ShortArray(n) { (out[it] * g).toInt().coerceIn(-32768, 32767).toShort() }
+    }
+}
+
+object Ambient {
+    private var track: AudioTrack? = null
+    private var current = -1
+
+    @Synchronized
+    fun stop() {
+        try { track?.stop(); track?.release() } catch (e: Exception) {}
+        track = null
+        current = -1
+    }
+
+    @Synchronized
+    fun play(style: Int, volume: Float) {
+        if (current == style && track != null) {
+            try { track?.setVolume(volume) } catch (e: Exception) {}
+            return
+        }
+        stop()
+        try {
+            val data = AmbientSynth.make(style)
+            val t = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder().setSampleRate(22050)
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build()
+                )
+                .setBufferSizeInBytes(data.size * 2)
+                .setTransferMode(AudioTrack.MODE_STATIC)
+                .build()
+            t.write(data, 0, data.size)
+            t.setLoopPoints(0, data.size, -1)
+            t.setVolume(volume)
+            t.play()
+            track = t
+            current = style
+        } catch (e: Exception) {}
+    }
 }
 
 // =====================================================================
@@ -973,8 +1228,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        AppState.fg = true
         AppState.saver = false
         AppState.resumeTick++
+    }
+
+    override fun onPause() {
+        super.onPause()
+        AppState.fg = false
     }
 }
 
@@ -985,7 +1246,7 @@ class MainActivity : ComponentActivity() {
 fun HomeScreen() {
     val ctx = LocalContext.current
     val store = remember { Store(ctx) }
-    val all = remember { loadApps(ctx) }
+    val all = remember { loadInputs(ctx) + loadApps(ctx) }
     val sounds = remember { Sounds() }
     val audio = remember { ctx.getSystemService(AudioManager::class.java) }
     DisposableEffect(Unit) { onDispose { sounds.release() } }
@@ -1003,6 +1264,16 @@ fun HomeScreen() {
 
     LaunchedEffect(Unit) { if (!AppState.mute) sounds.boot(); delay(800); soundOn = true }
     LaunchedEffect(AppState.all()) { AppState.save(store) }
+    val animVisible = AppState.bgMode == 2 || AppState.overlayOn || AppState.studioOpen ||
+        (AppState.saver && AppState.saverBg == 2)
+    LaunchedEffect(AppState.particleStyle, AppState.ambientOff, AppState.ambientVol, AppState.fg, animVisible) {
+        withContext(Dispatchers.Default) {
+            if (AppState.fg && !AppState.ambientOff && animVisible) {
+                Ambient.play(AppState.particleStyle, AMBIENT_VOLS[AppState.ambientVol])
+            } else Ambient.stop()
+        }
+    }
+    DisposableEffect(Unit) { onDispose { Ambient.stop() } }
     LaunchedEffect(AppState.resumeTick) { lastKey = System.currentTimeMillis() }
     LaunchedEffect(Unit) {
         while (true) {
@@ -1016,6 +1287,7 @@ fun HomeScreen() {
     // ----- Liste des applis -----
     val ordered = remember(hidden, order) { all.filter { it.pkg !in hidden }.sortedWith(
         compareBy<AppItem>(
+            { if (it.inputId != null) 0 else 1 },
             { order.indexOf(it.pkg).let { i -> if (i < 0) Int.MAX_VALUE else i } },
             { it.label.lowercase() }
         )
@@ -1025,6 +1297,7 @@ fun HomeScreen() {
         2 -> ordered.filter { it.cat == ApplicationInfo.CATEGORY_GAME }
         3 -> ordered.filter { it.cat == ApplicationInfo.CATEGORY_VIDEO }
         4 -> ordered.filter { it.cat == ApplicationInfo.CATEGORY_AUDIO }
+        5 -> ordered.filter { it.inputId != null }
         else -> ordered
     }
     val recentApps = recents.mapNotNull { p -> ordered.find { it.pkg == p } }.take(8)
@@ -1040,9 +1313,18 @@ fun HomeScreen() {
         if (!AppState.mute) sounds.select()
         recents = (listOf(app.pkg) + recents.filter { it != app.pkg }).take(10)
         store.save("recent", recents)
-        val i = ctx.packageManager.getLeanbackLaunchIntentForPackage(app.pkg)
-            ?: ctx.packageManager.getLaunchIntentForPackage(app.pkg)
-        i?.let { ctx.startActivity(it) }
+        val inputId = app.inputId
+        if (inputId != null) {
+            try {
+                ctx.startActivity(Intent(Intent.ACTION_VIEW, TvContract.buildChannelUriForPassthroughInput(inputId)))
+            } catch (e: Exception) {
+                AppState.banner = "Impossible d'ouvrir cette entrée : utilise la touche Source de la télécommande"
+            }
+        } else {
+            val i = ctx.packageManager.getLeanbackLaunchIntentForPackage(app.pkg)
+                ?: ctx.packageManager.getLaunchIntentForPackage(app.pkg)
+            i?.let { ctx.startActivity(it) }
+        }
     }
 
     val firstTile = remember { FocusRequester() }
@@ -1229,7 +1511,7 @@ fun HomeScreen() {
                     QuickItem("✨", "Studio") { AppState.menuOpen = false; AppState.studioOpen = true },
                     QuickItem("📷", "Photos et citations") { AppState.menuOpen = false; sub = "photos" },
                     QuickItem("📶", "Wi-Fi") { ctx.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) },
-                    QuickItem("⚙", "Paramètres de la télé") { ctx.startActivity(Intent(Settings.ACTION_SETTINGS)) },
+                    QuickItem("🛠️", "Paramètres de la télé") { ctx.startActivity(Intent(Settings.ACTION_SETTINGS)) },
                     QuickItem("🌙", "Écran de veille") { AppState.menuOpen = false; AppState.saver = true },
                     QuickItem("👁", "Réafficher les applis") { hidden = emptyList(); store.save("hidden", hidden) },
                 )
@@ -1744,11 +2026,11 @@ fun AppTile(
 //  STUDIO DE PERSONNALISATION
 // =====================================================================
 @Composable
-fun TabButton(text: String, selected: Boolean, accent: Color, requester: FocusRequester?, onFocus: () -> Unit) {
+fun TabButton(text: String, selected: Boolean, accent: Color, requester: FocusRequester?, modifier: Modifier = Modifier, onFocus: () -> Unit) {
     var f by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(14.dp)
     Box(
-        Modifier
+        modifier
             .then(if (requester != null) Modifier.focusRequester(requester) else Modifier)
             .onFocusChanged { f = it.isFocused; if (it.isFocused) onFocus() }
             .clip(shape)
@@ -1758,7 +2040,7 @@ fun TabButton(text: String, selected: Boolean, accent: Color, requester: FocusRe
             .padding(horizontal = 14.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(text, color = Color.White, fontSize = 16.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+        Text(text, color = Color.White, fontSize = 15.sp, maxLines = 1, softWrap = false, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
     }
 }
 
@@ -1821,7 +2103,7 @@ fun PreviewPanel(accent: Color, theme: Theme, modifier: Modifier) {
     ) {
         Text("Aperçu en direct", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(10.dp))
-        Box(Modifier.fillMaxWidth().height(90.dp).clip(RoundedCornerShape(14.dp)).background(Color.Black.copy(alpha = 0.5f))) {
+        Box(Modifier.fillMaxWidth().height(64.dp).clip(RoundedCornerShape(14.dp)).background(Color.Black.copy(alpha = 0.5f))) {
             Particles(accent, theme.second)
         }
         Spacer(Modifier.height(16.dp))
@@ -1847,9 +2129,9 @@ fun PreviewPanel(accent: Color, theme: Theme, modifier: Modifier) {
             }
         }
         Spacer(Modifier.height(16.dp))
-        Text("Thème : ${theme.name}", color = Color.White.copy(alpha = 0.9f), fontSize = 15.sp)
-        Text("Tuiles : ${SHAPES[AppState.tileShape]} • ${LAYOUT_NAMES[AppState.layoutMode]}", color = Color.White.copy(alpha = 0.9f), fontSize = 15.sp)
-        Text("Animation : ${PARTICLE_STYLES[AppState.particleStyle]}", color = Color.White.copy(alpha = 0.9f), fontSize = 15.sp)
+        Text("Thème : ${theme.name}", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
+        Text("Tuiles : ${SHAPES[AppState.tileShape]} • ${LAYOUT_NAMES[AppState.layoutMode]}", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
+        Text("Animation : ${PARTICLE_STYLES[AppState.particleStyle]}", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
     }
 }
 
@@ -1875,8 +2157,8 @@ fun Studio(
                 NeonButton("✕ Fermer", accent) { onClose() }
             }
             Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                tabs.forEachIndexed { i, t -> TabButton(t, tab == i, accent, if (i == 0) first else null) { tab = i } }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                tabs.forEachIndexed { i, t -> TabButton(t, tab == i, accent, if (i == 0) first else null, Modifier.weight(1f)) { tab = i } }
             }
             Row(
                 Modifier.weight(1f).fillMaxWidth().padding(top = 16.dp),
@@ -1925,6 +2207,10 @@ fun Studio(
                             }
                             OptionRow("Vitesse", ANIM_SPEED_NAMES[AppState.animSpeed], accent) { d ->
                                 AppState.animSpeed = cyc(AppState.animSpeed, ANIM_SPEEDS.size, d)
+                            }
+                            OptionRow("Sons d'ambiance", onOff(!AppState.ambientOff), accent) { AppState.ambientOff = !AppState.ambientOff }
+                            OptionRow("Volume des sons", AMBIENT_NAMES[AppState.ambientVol], accent) { d ->
+                                AppState.ambientVol = cyc(AppState.ambientVol, AMBIENT_VOLS.size, d)
                             }
                         }
                         3 -> {
