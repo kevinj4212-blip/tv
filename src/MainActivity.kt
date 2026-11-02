@@ -119,6 +119,7 @@ import coil.imageLoader
 import coil.request.ImageRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -195,7 +196,8 @@ val THEMES = listOf(
 val BG_MODES = listOf("Images", "Vidéo", "Animation", "Mes photos")
 val PARTICLE_STYLES = listOf(
     "Étoiles", "Étoiles filantes", "Pluie néon", "Neige", "Bulles", "Lucioles",
-    "Matrix", "Aurore boréale", "Grille synthwave", "Vagues néon", "Tunnel d'étoiles", "Pétales"
+    "Matrix", "Aurore boréale", "Grille synthwave", "Vagues néon", "Tunnel d'étoiles", "Pétales",
+    "Galaxie spirale", "Feux d'artifice", "Nébuleuse", "Orage", "Anneaux néon"
 )
 val DIM_LEVELS = listOf(0.08f, 0.25f, 0.45f)
 val DIM_NAMES = listOf("Lumineux", "Normal", "Sombre")
@@ -285,6 +287,7 @@ val ANIM_COUNTS = listOf(30, 12, 60)
 val ANIM_SPEED_NAMES = listOf("Normale", "Lente", "Rapide")
 val AMBIENT_VOLS = listOf(0.25f, 0.5f, 0.85f)
 val AMBIENT_NAMES = listOf("Faible", "Moyen", "Fort")
+val QUALITY_NAMES = listOf("Simple", "Belle")
 val ANIM_SPEEDS = listOf(30000, 60000, 15000)
 val SHAPES = listOf("Arrondie", "Carrée", "Très arrondie", "Pilule", "Cercle", "Hexagone", "Coins coupés")
 val GAP_NAMES = listOf("Normal", "Serré", "Large")
@@ -330,7 +333,7 @@ fun bumpPin(pos: Int, d: Int) {
 }
 
 data class QuickItem(val icon: String, val label: String, val action: () -> Unit)
-val WALL_DELAYS = listOf(10, 5, 20, 30, 60)
+val WALL_DELAYS = listOf(30, 15, 60, 120, 10, 5, 20)
 val TILE_NAMES = listOf("Moyenne", "Petite", "Grande")
 val TILE_SCALES = listOf(1f, 0.85f, 1.1f)
 val FOCUS_STYLES = listOf("PS5", "Simple", "Aucune")
@@ -410,6 +413,9 @@ object AppState {
     var fg by mutableStateOf(true)
     var ambientOff by mutableStateOf(false)
     var ambientVol by mutableStateOf(0)
+    var animQuality by mutableStateOf(0)
+    var videoTick by mutableStateOf(0)
+    var packTick by mutableStateOf(0)
 
     private fun b(x: Boolean) = if (x) 1 else 0
 
@@ -417,14 +423,14 @@ object AppState {
         "theme", "bg", "wall", "pstyle", "dim", "sbg", "fx", "delay", "tile", "focus",
         "hue", "h12", "hidesec", "hidebarca", "hiderates", "mute", "city", "sdelay",
         "overlay", "acount", "aspeed", "shape", "gap", "zoom", "border", "labels", "hiderecents",
-        "layout", "hideweather", "hidewifi", "clock", "hidequotes", "qdelay", "pin1", "pinoff", "ambientoff", "avol"
+        "layout", "hideweather", "hidewifi", "clock", "hidequotes", "qdelay", "pin1", "pinoff", "ambientoff", "avol", "aq"
     )
 
     fun all(): List<Int> = listOf(
         themeIndex, bgMode, wallIndex, particleStyle, dimIndex, saverBg, fx, delayIndex, tileIndex, focusStyle,
         hue, b(h12), b(hideSec), b(hideBarca), b(hideRates), b(mute), cityIndex, saverDelay,
         b(overlayOn), animCount, animSpeed, tileShape, tileGap, zoomIndex, borderMode, b(showLabels), b(hideRecents),
-        layoutMode, b(hideWeather), b(hideWifi), clockSize, b(hideQuotes), quoteDelay, pinCode + 1, b(pinOff), b(ambientOff), ambientVol
+        layoutMode, b(hideWeather), b(hideWifi), clockSize, b(hideQuotes), quoteDelay, pinCode + 1, b(pinOff), b(ambientOff), ambientVol, animQuality
     )
 
     fun save(st: Store) {
@@ -471,6 +477,7 @@ object AppState {
         pinOff = st.int("pinoff") == 1
         ambientOff = st.int("ambientoff") == 1
         ambientVol = st.int("avol").coerceIn(0, AMBIENT_VOLS.lastIndex)
+        animQuality = st.int("aq").coerceIn(0, QUALITY_NAMES.lastIndex)
     }
 
     fun reset(st: Store) {
@@ -621,7 +628,7 @@ class Sounds {
 //  SONS D'AMBIANCE (un par animation, générés par l'appli)
 // =====================================================================
 object AmbientSynth {
-    private const val RATE = 22050
+    const val RATE = 32000
     private const val SECONDS = 6
     private const val TAU = 6.283185307179586
 
@@ -696,6 +703,40 @@ object AmbientSynth {
         }
     }
 
+    private fun crackle(x: FloatArray, start: Int, level: Float, r: Random) {
+        for (i in 0 until 700) {
+            val idx = start + i
+            if (idx >= x.size) break
+            x[idx] += (r.nextFloat() * 2f - 1f) * level * exp(-6.0 * i / 700).toFloat()
+        }
+    }
+
+    private fun rumble(x: FloatArray, start: Int, r: Random) {
+        val len = (RATE * 2.0).toInt()
+        var y = 0f
+        for (i in 0 until len) {
+            val idx = start + i
+            if (idx >= x.size) break
+            y += 0.02f * ((r.nextFloat() * 2f - 1f) - y)
+            x[idx] += y * 14f * exp(-2.0 * i / RATE).toFloat() * minOf(1f, i / 800f)
+        }
+    }
+
+    // réverbération simple : quatre échos qui se répondent
+    private fun reverb(x: FloatArray, mix: Float) {
+        val delays = intArrayOf((RATE * 0.029).toInt(), (RATE * 0.037).toInt(), (RATE * 0.053).toInt(), (RATE * 0.071).toInt())
+        val gains = floatArrayOf(0.5f, 0.42f, 0.34f, 0.27f)
+        val wet = FloatArray(x.size)
+        for (k in delays.indices) {
+            val d = delays[k]
+            val g = gains[k]
+            val buf = FloatArray(x.size)
+            for (i in x.indices) buf[i] = x[i] + (if (i >= d) buf[i - d] * g else 0f)
+            for (i in x.indices) wet[i] += buf[i] * 0.25f
+        }
+        for (i in x.indices) x[i] = x[i] * (1f - mix) + wet[i] * mix
+    }
+
     fun make(style: Int): ShortArray {
         val n = RATE * SECONDS
         val f = 4000
@@ -754,8 +795,35 @@ object AmbientSynth {
                 bed(x, r, 0.04f, 0f, 0.3f, 3.0, 0.5f)
                 repeat(6) { bell(x, r.nextInt(n - 8000), 1046.5 + r.nextInt(700), 0.18f, 1.5f) }
             }
+            12 -> { // galaxie : nappe cosmique et cloches lointaines
+                pad(x, listOf(165, 220, 330), 0.035f)
+                modulate(x, 6.0, 0.3f)
+                repeat(5) { bell(x, r.nextInt(n - 20000), pent(r) / 2, 0.22f, 1.0f) }
+            }
+            13 -> { // feux d'artifice : sifflement, explosion, crépitements
+                repeat(4) {
+                    val st = r.nextInt(n - 40000) + 16000
+                    chirp(x, st - 14000, 600.0, 2000.0, 14000, 0.12f)
+                    tone(x, st, 55.0, 14000, 0.9f, 6f)
+                    repeat(10) { crackle(x, st + 2000 + r.nextInt(30000), 0.25f, r) }
+                }
+            }
+            14 -> { // nébuleuse : nappe profonde et scintillements
+                pad(x, listOf(110, 165, 220, 330), 0.03f)
+                modulate(x, 6.0, 0.4f)
+                repeat(8) { tone(x, r.nextInt(n - 20000), 2093.0 + r.nextInt(900), 18000, 0.12f, 3f) }
+            }
+            15 -> { // orage : pluie et tonnerre
+                bed(x, r, 0.6f, 0.12f, 0.55f)
+                repeat(2) { rumble(x, r.nextInt(n - 70000), r) }
+            }
+            16 -> { // anneaux : sonar
+                for (k in 0 until 6) tone(x, k * RATE, 660.0, RATE, 0.4f, 3.0f, 2.0)
+                pad(x, listOf(110), 0.02f)
+            }
             else -> pad(x, listOf(220), 0.05f)
         }
+        if (style in listOf(0, 1, 4, 5, 11, 12, 14, 16)) reverb(x, 0.5f)
         // raccord sans clic : la fin se fond dans le début
         val out = FloatArray(n)
         for (i in 0 until n) out[i] = x[i]
@@ -797,7 +865,7 @@ object Ambient {
                         .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build()
                 )
                 .setAudioFormat(
-                    AudioFormat.Builder().setSampleRate(22050)
+                    AudioFormat.Builder().setSampleRate(AmbientSynth.RATE)
                         .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                         .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build()
                 )
@@ -901,31 +969,65 @@ fun rememberNow(): Date {
     return now
 }
 
+fun packDir(ctx: Context, idx: Int) = File(ctx.cacheDir, "pack/$idx")
+
+fun packFiles(dir: File): List<File> =
+    dir.listFiles { f -> f.name.endsWith(".jpg") }?.sortedBy { it.name } ?: emptyList()
+
+fun packFresh(dir: File): Boolean {
+    val st = File(dir, "stamp")
+    if (!st.exists() || packFiles(dir).size < 8) return false
+    val t = st.readText().trim().toLongOrNull() ?: return false
+    return System.currentTimeMillis() - t < 24 * 3_600_000L
+}
+
+// télécharge 15 images une bonne fois pour toutes (elles sont ensuite lues depuis la télé)
+fun downloadPack(dir: File, theme: WallTheme) {
+    dir.parentFile?.listFiles()?.filter { it.absolutePath != dir.absolutePath }?.forEach { it.deleteRecursively() }
+    dir.mkdirs()
+    dir.listFiles()?.forEach { it.delete() }
+    val queries = theme.query.split("|").shuffled().take(3)
+    val perQuery = if (queries.size == 1) 15 else 5
+    val paths = mutableListOf<String>()
+    for (q in queries) {
+        val url = URL(
+            "https://wallhaven.cc/api/v1/search?q=" + URLEncoder.encode(q, "UTF-8") +
+                "&categories=" + theme.cats + "&purity=100&sorting=random&atleast=1920x1080&page=1"
+        )
+        val arr = JSONObject(url.readText()).getJSONArray("data")
+        paths.addAll(List(arr.length()) { arr.getJSONObject(it).getString("path") }.shuffled().take(perQuery))
+    }
+    var ok = 0
+    paths.forEachIndexed { i, p ->
+        val f = File(dir, "p%02d.jpg".format(i))
+        try {
+            URL(p).openStream().use { input -> f.outputStream().use { out -> input.copyTo(out) } }
+            ok++
+        } catch (e: Exception) { f.delete() }
+    }
+    if (ok > 0) File(dir, "stamp").writeText(System.currentTimeMillis().toString())
+}
+
 @Composable
 fun rememberWallpaper(): String? {
     val ctx = LocalContext.current
     var current by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(AppState.wallpaperSkip, AppState.wallIndex) {
-        var queue = emptyList<String>()
+    LaunchedEffect(AppState.wallpaperSkip, AppState.wallIndex, AppState.packTick) {
+        val dir = packDir(ctx, AppState.wallIndex)
+        if (!packFresh(dir)) {
+            launch(Dispatchers.IO) {
+                val ok = try { downloadPack(dir, WALL_THEMES[AppState.wallIndex]); true } catch (e: Exception) { false }
+                if (!ok) delay(60_000)
+                AppState.packTick++
+            }
+        }
+        var idx = Random.nextInt(1000)
         while (true) {
-            if (queue.isEmpty()) {
-                queue = withContext(Dispatchers.IO) {
-                    try {
-                        val url = URL(
-                            "https://wallhaven.cc/api/v1/search?q=" + URLEncoder.encode(WALL_THEMES[AppState.wallIndex].query.split("|").random(), "UTF-8") +
-                                "&categories=" + WALL_THEMES[AppState.wallIndex].cats + "&purity=100&sorting=random&atleast=1920x1080&page=1"
-                        )
-                        val arr = JSONObject(url.readText()).getJSONArray("data")
-                        List(arr.length()) { arr.getJSONObject(it).getString("path") }
-                    } catch (e: Exception) { emptyList() }
-                }
-                if (queue.isEmpty()) { delay(15_000); continue }
-            }
-            current = queue.first()
-            queue = queue.drop(1)
-            queue.firstOrNull()?.let {
-                ctx.imageLoader.enqueue(wallpaperRequest(ctx, it))
-            }
+            val files = withContext(Dispatchers.IO) { packFiles(dir) }
+            if (files.isEmpty()) { delay(3000); continue }
+            current = files[idx % files.size].absolutePath
+            idx++
+            files.getOrNull(idx % files.size)?.let { ctx.imageLoader.enqueue(wallpaperRequest(ctx, it)) }
             delay(WALL_DELAYS[AppState.delayIndex] * 1000L)
         }
     }
@@ -1031,6 +1133,7 @@ fun localIp(): String = try {
 object Remote {
     private var server: ServerSocket? = null
     @Volatile var photoDir: File? = null
+    @Volatile var videoDir: File? = null
     @Volatile var quotesFile: File? = null
 
     fun addQuote(q: String) {
@@ -1039,7 +1142,7 @@ object Remote {
         if (t.isNotEmpty()) { f.appendText(t + "\n"); AppState.photoTick++ }
     }
 
-    private const val PAGE = """<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{background:#111;color:#fff;font-family:sans-serif;text-align:center}a,button{display:block;margin:12px auto;padding:16px;width:80%;font-size:20px;border-radius:12px;background:#ff2bd6;color:#fff;border:0;text-decoration:none}input[type=text]{width:75%;padding:14px;font-size:20px}input[type=file]{display:block;margin:10px auto;font-size:16px}</style></head><body><h2>Ma TV</h2><a href="/theme">Couleurs suivantes</a><a href="/bg">Changer de fond</a><a href="/wall">Thème d'images suivant</a><a href="/style">Particules suivantes</a><a href="/next">Image suivante</a><a href="/saver">Écran de veille</a><form action="/msg"><input type="text" name="t" placeholder="Message sur la télé"><button>Envoyer</button></form><form action="/addquote"><input type="text" name="t" placeholder="Ta citation pour la veille"><button>Ajouter la citation</button></form><h3>Envoyer des photos sur la télé</h3><input type="file" id="f" accept="image/*" multiple><button onclick="up()">Envoyer</button><p id="s"></p><script>async function up(){var fs=document.getElementById('f').files,s=document.getElementById('s');for(var i=0;i<fs.length;i++){s.textContent='Envoi '+(i+1)+'/'+fs.length+'...';await fetch('/upload?n='+Date.now()+'_'+i,{method:'POST',body:fs[i]});}s.textContent='Terminé ('+fs.length+' photo(s))';}</script></body></html>"""
+    private const val PAGE = """<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{background:#111;color:#fff;font-family:sans-serif;text-align:center}a,button{display:block;margin:12px auto;padding:16px;width:80%;font-size:20px;border-radius:12px;background:#ff2bd6;color:#fff;border:0;text-decoration:none}input[type=text]{width:75%;padding:14px;font-size:20px}input[type=file]{display:block;margin:10px auto;font-size:16px}</style></head><body><h2>Ma TV</h2><a href="/theme">Couleurs suivantes</a><a href="/bg">Changer de fond</a><a href="/wall">Thème d'images suivant</a><a href="/style">Particules suivantes</a><a href="/next">Image suivante</a><a href="/saver">Écran de veille</a><form action="/msg"><input type="text" name="t" placeholder="Message sur la télé"><button>Envoyer</button></form><form action="/addquote"><input type="text" name="t" placeholder="Ta citation pour la veille"><button>Ajouter la citation</button></form><h3>Envoyer des photos sur la télé</h3><input type="file" id="f" accept="image/*" multiple><button onclick="up()">Envoyer</button><p id="s"></p><script>async function up(){var fs=document.getElementById('f').files,s=document.getElementById('s');for(var i=0;i<fs.length;i++){s.textContent='Envoi '+(i+1)+'/'+fs.length+'...';await fetch('/upload?n='+Date.now()+'_'+i,{method:'POST',body:fs[i]});}s.textContent='Terminé ('+fs.length+' photo(s))';}</script><h3>Envoyer des vidéos (fond animé)</h3><input type="file" id="v" accept="video/*" multiple><button onclick="upv()">Envoyer</button><p id="sv"></p><script>async function upv(){var fs=document.getElementById('v').files,s=document.getElementById('sv');for(var i=0;i<fs.length;i++){s.textContent='Envoi '+(i+1)+'/'+fs.length+'...';await fetch('/uploadv?n='+Date.now()+'_'+i,{method:'POST',body:fs[i]});}s.textContent='Terminé ('+fs.length+' vidéo(s))';}</script></body></html>"""
 
     fun start() {
         if (server != null) return
@@ -1146,18 +1249,19 @@ object Remote {
 
                 // ----- tout le reste demande le PIN -----
                 if (!authed) {
-                    send(out, if (cmd == "/upload") "401 Unauthorized" else "200 OK", loginPage(""))
+                    send(out, if (cmd.startsWith("/upload")) "401 Unauthorized" else "200 OK", loginPage(""))
                     return
                 }
 
-                if (cmd == "/upload") {
-                    val dir = photoDir
+                if (cmd == "/upload" || cmd == "/uploadv") {
+                    val isV = cmd == "/uploadv"
+                    val dir = if (isV) videoDir else photoDir
                     var ok = false
-                    if (dir != null && len in 1..25_000_000L) {
+                    if (dir != null && len in 1..(if (isV) 400_000_000L else 25_000_000L)) {
                         dir.mkdirs()
                         val name = path.substringAfter("n=", "x")
                             .filter { ch -> ch.isLetterOrDigit() || ch == '_' }.take(40)
-                        File(dir, "p_$name.img").outputStream().use { os ->
+                        File(dir, (if (isV) "v_" else "p_") + name + (if (isV) ".mp4" else ".img")).outputStream().use { os ->
                             val buf = ByteArray(8192)
                             var left = len
                             while (left > 0) {
@@ -1167,7 +1271,7 @@ object Remote {
                                 left -= n
                             }
                         }
-                        AppState.photoTick++
+                        if (isV) AppState.videoTick++ else AppState.photoTick++
                         ok = true
                     }
                     val status = if (ok) "200 OK" else "400 Bad Request"
@@ -1211,6 +1315,7 @@ class MainActivity : ComponentActivity() {
         val st = Store(this)
         AppState.load(st)
         Remote.photoDir = File(filesDir, "photos").apply { mkdirs() }
+        Remote.videoDir = File(filesDir, "videos").apply { mkdirs() }
         Remote.quotesFile = File(filesDir, "quotes.txt")
         Remote.start()
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
@@ -1347,8 +1452,9 @@ fun HomeScreen() {
             }
     ) {
         // Fond : images / vidéo / particules
-        val useVideo = AppState.bgMode == 1 && VIDEO_URLS.isNotEmpty()
-        if (useVideo) VideoBg(VIDEO_URLS)
+        val vids = remember(AppState.videoTick) { videoFiles().map { it.absolutePath } }
+        val useVideo = AppState.bgMode == 1 && vids.isNotEmpty() && !AppState.saver
+        if (useVideo) VideoBg(vids)
         Box(Modifier.fillMaxSize().graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)) {
         if (!useVideo && !AppState.saver) {
             when (AppState.bgMode) {
@@ -1548,6 +1654,7 @@ fun HomeScreen() {
             Panel("📷 Photos et citations", accent) { first ->
                 val count = remember(AppState.photoTick) { photoFiles().size }
                 val nq = remember(AppState.photoTick) { customQuotes().size }
+                val nv = remember(AppState.videoTick) { videoFiles().size }
                 Text("Sur ton téléphone (même Wi-Fi), ouvre :", color = Color.White, fontSize = 16.sp)
                 Text("http://${localIp()}:$REMOTE_PORT", color = accent, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Text("Tu y envoies tes photos et tes citations.", color = Color.White, fontSize = 16.sp)
@@ -1555,12 +1662,15 @@ fun HomeScreen() {
                     if (AppState.pinOff) "Page sans code PIN" else "Code PIN : " + "%04d".format(AppState.pinCode),
                     color = accent, fontSize = 20.sp, fontWeight = FontWeight.Bold
                 )
-                Text("Photos : $count   •   Citations perso : $nq", color = Color.White, fontSize = 18.sp)
+                Text("Photos : $count  •  Vidéos : $nv  •  Citations : $nq", color = Color.White, fontSize = 17.sp)
                 NeonButton("🗑 Supprimer mes photos", accent, requester = first) {
                     photoFiles().forEach { it.delete() }; AppState.photoTick++
                 }
                 NeonButton("🗑 Supprimer mes citations", accent) {
                     Remote.quotesFile?.delete(); AppState.photoTick++
+                }
+                NeonButton("🗑 Supprimer mes vidéos", accent) {
+                    videoFiles().forEach { it.delete() }; AppState.videoTick++
                 }
                 NeonButton("Fermer", accent) { sub = "" }
             }
@@ -1706,10 +1816,10 @@ fun Particles(color: Color, second: Color = color, style: Int = AppState.particl
             floatArrayOf(Random.nextFloat(), Random.nextFloat(), Random.nextInt(1, 4).toFloat(), 1f + Random.nextFloat() * 3f)
         }
     }
-    Canvas(Modifier.fillMaxSize()) { drawAnim(style, t, color, second, seeds) }
+    Canvas(Modifier.fillMaxSize()) { drawAnim(style, t, color, second, seeds, AppState.animQuality) }
 }
 
-fun DrawScope.drawAnim(style: Int, t: Float, c: Color, c2: Color, seeds: List<FloatArray>) {
+fun DrawScope.drawAnim(style: Int, t: Float, c: Color, c2: Color, seeds: List<FloatArray>, q: Int = 0) {
     val w = size.width
     val h = size.height
     val tau = 6.2832f
@@ -1751,6 +1861,7 @@ fun DrawScope.drawAnim(style: Int, t: Float, c: Color, c2: Color, seeds: List<Fl
             val x = 0.5f + 0.45f * sin((t * s[2] + s[0]) * tau)
             val y = 0.5f + 0.4f * sin((t * (s[2] + 1f) + s[1]) * tau)
             val a = 0.25f + 0.5f * (0.5f + 0.5f * sin((t * 3f * s[2] + s[0]) * tau))
+            if (q == 1) drawCircle(c.copy(alpha = a * 0.25f), s[3] * 10f, Offset(x * w, y * h))
             drawCircle(c.copy(alpha = a), s[3] * 3.5f, Offset(x * w, y * h))
         }
         6 -> seeds.forEach { s -> // matrix
@@ -1822,9 +1933,105 @@ fun DrawScope.drawAnim(style: Int, t: Float, c: Color, c2: Color, seeds: List<Fl
                 drawOval(Color(0xFFFF9EC4).copy(alpha = 0.8f), Offset(x * w - s[3] * 3f, y * h - s[3] * 1.8f), Size(s[3] * 6f, s[3] * 3.6f))
             }
         }
+        12 -> { // galaxie spirale
+            val cx = w / 2f
+            val cy = h / 2f
+            val rMax = minOf(w, h) * 0.55f
+            if (q == 1) {
+                drawCircle(
+                    Brush.radialGradient(listOf(c.copy(alpha = 0.35f), Color.Transparent), center = Offset(cx, cy), radius = rMax * 0.6f),
+                    rMax * 0.6f, Offset(cx, cy)
+                )
+            }
+            seeds.forEachIndexed { i, s ->
+                val arm = i % 3
+                val r = s[1] * s[1] * rMax + 8f
+                val ang = arm * (tau / 3f) + r / rMax * 5f + t * tau
+                val x = cx + cos(ang) * r * 1.35f
+                val y = cy + sin(ang) * r * 0.62f
+                val mix = r / rMax
+                val col = if (mix < 0.5f) c else c2
+                drawCircle(col.copy(alpha = 0.35f + 0.5f * (1f - mix)), s[3] * (1.2f + (1f - mix) * 1.5f), Offset(x, y))
+                if (q == 1 && s[3] > 3f) drawCircle(col.copy(alpha = 0.12f), s[3] * 7f, Offset(x, y))
+            }
+        }
+        13 -> { // feux d'artifice
+            for (b in 0 until 4) {
+                val ph = t * 3f + b * 0.25f
+                val p = ph % 1f
+                if (p < 0.55f) {
+                    val q2 = p / 0.55f
+                    val cyc = ph.toInt()
+                    val ox = (0.2f + 0.6f * (((b * 37 + cyc * 17) % 10) / 10f)) * w
+                    val oy = (0.2f + 0.3f * (((b * 53 + cyc * 11) % 10) / 10f)) * h
+                    val burstR = minOf(w, h) * 0.28f
+                    val col = when (b % 3) { 0 -> c; 1 -> c2; else -> Color.White }
+                    for (k in 0 until 24) {
+                        val a = k * tau / 24f
+                        val d = burstR * q2 * (1f - 0.25f * q2)
+                        val px = ox + cos(a) * d
+                        val py = oy + sin(a) * d + 40f * q2 * q2
+                        drawCircle(col.copy(alpha = 1f - q2), 3.5f * (1f - 0.5f * q2), Offset(px, py))
+                        if (q == 1) drawCircle(col.copy(alpha = (1f - q2) * 0.18f), 10f, Offset(px, py))
+                    }
+                }
+            }
+        }
+        14 -> { // nébuleuse
+            val blobs = if (q == 1) 4 else 2
+            for (b in 0 until blobs) {
+                val blobX = w * (0.5f + 0.35f * sin(t * tau * (1 + b % 2) + b * 1.7f))
+                val blobY = h * (0.5f + 0.3f * cos(t * tau + b * 2.3f))
+                val col = if (b % 2 == 0) c else c2
+                val rad = minOf(w, h) * (0.45f + 0.1f * b)
+                drawCircle(
+                    Brush.radialGradient(listOf(col.copy(alpha = 0.30f), Color.Transparent), center = Offset(blobX, blobY), radius = rad),
+                    rad, Offset(blobX, blobY)
+                )
+            }
+            seeds.forEach { s ->
+                val tw = 0.3f + 0.6f * (0.5f + 0.5f * sin((t * 3f * s[2] + s[0]) * tau))
+                drawCircle(Color.White.copy(alpha = tw * 0.7f), s[3] * 0.8f, Offset(s[0] * w, s[1] * h))
+            }
+        }
+        15 -> { // orage : pluie et éclairs
+            seeds.forEach { s ->
+                val y = (s[1] + t * s[2] * 2f) % 1f
+                drawLine(c.copy(alpha = 0.5f), Offset(s[0] * w, y * h), Offset(s[0] * w - 6f, y * h + 16f * s[3]), 2f)
+            }
+            val ph = (t * 5f) % 1f
+            if (ph < 0.06f) {
+                val k = ph / 0.06f
+                drawRect(Color.White.copy(alpha = 0.22f * (1f - k)))
+                if (q == 1 || ph < 0.03f) {
+                    val bolt = Path()
+                    var bx = w * (0.2f + 0.6f * (((t * 5f).toInt() * 37 % 10) / 10f))
+                    bolt.moveTo(bx, 0f)
+                    for (i in 1..8) {
+                        bx += (seeds[i % seeds.size][0] - 0.5f) * w * 0.12f
+                        bolt.lineTo(bx, h * i / 8f)
+                    }
+                    drawPath(bolt, Color.White.copy(alpha = 0.9f * (1f - k)), style = Stroke(width = 4f))
+                }
+            }
+        }
+        16 -> { // anneaux néon
+            val cx = w / 2f
+            val cy = h / 2f
+            val maxR = maxOf(w, h) * 0.6f
+            for (j in 0 until 6) {
+                val p = ((j / 6f) + t * 2f) % 1f
+                val col = if (j % 2 == 0) c else c2
+                drawCircle(col.copy(alpha = (1f - p) * 0.8f), p * maxR, Offset(cx, cy), style = Stroke(width = 3f + 4f * (1f - p)))
+                if (q == 1) {
+                    drawCircle(col.copy(alpha = (1f - p) * 0.12f), p * maxR, Offset(cx, cy), style = Stroke(width = 18f * (1f - p) + 6f))
+                }
+            }
+        }
         else -> seeds.forEach { s -> // étoiles
             val y = ((s[1] - t * s[2]) % 1f + 1f) % 1f
             val x = s[0] + 0.02f * sin((t * 3f * s[2] + s[0]) * tau)
+            if (q == 1) drawCircle(c.copy(alpha = 0.08f), s[3] * 9f, Offset(x * w, y * h))
             drawCircle(c.copy(alpha = 0.25f + 0.05f * s[3]), s[3] * 2.5f, Offset(x * w, y * h))
         }
     }
@@ -1869,19 +2076,22 @@ fun Wallpaper(url: String?) {
     }
 }
 
+fun videoFiles(): List<File> =
+    Remote.videoDir?.listFiles()?.filter { it.isFile && it.name.endsWith(".mp4") }?.sortedBy { it.name } ?: emptyList()
+
 @Composable
-fun VideoBg(urls: List<String>) {
+fun VideoBg(paths: List<String>) {
     var i by remember { mutableStateOf(0) }
     AndroidView(
         factory = { c ->
             VideoView(c).apply {
-                setOnPreparedListener { it.setVolume(0f, 0f) }
-                setOnCompletionListener { i = (i + 1) % urls.size }
+                setOnPreparedListener { it.setVolume(0f, 0f); it.isLooping = paths.size == 1 }
+                setOnCompletionListener { i = (i + 1) % paths.size }
             }
         },
         update = { v ->
-            val u = urls[i]
-            if (v.tag != u) { v.tag = u; v.setVideoURI(Uri.parse(u)); v.start() }
+            val u = paths[i % paths.size]
+            if (v.tag != u) { v.tag = u; v.setVideoPath(u); v.start() }
         },
         modifier = Modifier.fillMaxSize()
     )
@@ -2140,6 +2350,7 @@ fun Studio(
     accent: Color, theme: Theme,
     onClose: () -> Unit, onPhotos: () -> Unit, onUnhide: () -> Unit, onReset: () -> Unit
 ) {
+    val ctx = LocalContext.current
     var tab by remember { mutableStateOf(0) }
     val tabs = listOf("🎨 Couleurs", "🖼 Fond", "✨ Animations", "📱 Applis", "🕒 Infos", "🌙 Veille", "⚡ Système")
     val first = remember { FocusRequester() }
@@ -2196,12 +2407,19 @@ fun Studio(
                                 AppState.delayIndex = cyc(AppState.delayIndex, WALL_DELAYS.size, d)
                             }
                             NeonButton("⏭ Image suivante", accent, Modifier.fillMaxWidth()) { AppState.wallpaperSkip++ }
+                            NeonButton("📦 Renouveler le pack de 15 images", accent, Modifier.fillMaxWidth()) {
+                                File(packDir(ctx, AppState.wallIndex), "stamp").delete(); AppState.packTick++
+                            }
+                            NeonButton("🎬 Ajouter mes vidéos (page web)", accent, Modifier.fillMaxWidth()) { onPhotos() }
                         }
                         2 -> {
                             OptionRow("Style d'animation", PARTICLE_STYLES[AppState.particleStyle], accent) { d ->
                                 AppState.particleStyle = cyc(AppState.particleStyle, PARTICLE_STYLES.size, d)
                             }
                             OptionRow("Animation par-dessus le fond", onOff(AppState.overlayOn), accent) { AppState.overlayOn = !AppState.overlayOn }
+                            OptionRow("Qualité (halos, détails)", QUALITY_NAMES[AppState.animQuality], accent) { d ->
+                                AppState.animQuality = cyc(AppState.animQuality, QUALITY_NAMES.size, d)
+                            }
                             OptionRow("Quantité", ANIM_COUNT_NAMES[AppState.animCount], accent) { d ->
                                 AppState.animCount = cyc(AppState.animCount, ANIM_COUNTS.size, d)
                             }
