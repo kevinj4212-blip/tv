@@ -4,10 +4,10 @@ plugins {
 }
 
 android {
-    namespace = "com.exemple.ps5launcher"
+    namespace = "com.exemple.nova"
     compileSdk = 34
     defaultConfig {
-        applicationId = "com.exemple.ps5launcher"
+        applicationId = "com.exemple.nova"
         minSdk = 26
         targetSdk = 34
         versionCode = 1
@@ -26,8 +26,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
-    composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
     sourceSets {
         getByName("main") {
             java.srcDir("src")
@@ -37,11 +35,6 @@ android {
 }
 
 dependencies {
-    implementation(platform("androidx.compose:compose-bom:2024.06.00"))
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.foundation:foundation")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.activity:activity-compose:1.9.0")
     implementation("androidx.core:core-ktx:1.13.1")
-    implementation("io.coil-kt:coil-compose:2.6.0")
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
 }
